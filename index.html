@@ -323,6 +323,9 @@ body::before {
 .rec-item.voided .rec-code { text-decoration: line-through; }
 .void-badge { font-size: 0.66rem; color: var(--out); border: 1px solid var(--out); border-radius: 3px; padding: 0 5px; margin-left: 6px; }
 .edited-badge { font-size: 0.66rem; color: var(--gold); margin-left: 6px; }
+.rec-item.stocktake { border-left: 2px solid var(--gold); padding-left: 8px; background: rgba(200,168,75,0.05); }
+.st-badge { font-size: 0.66rem; color: var(--gold); border: 1px solid var(--gold-dim); border-radius: 3px; padding: 0 5px; margin-left: 6px; }
+.rec-item.stocktake .rec-qty { color: var(--gold-light); }
 
 .table-wrap { overflow-x: auto; }
 table.summary { width: 100%; border-collapse: collapse; font-family: 'DM Mono', monospace; font-size: 0.82rem; }
@@ -480,12 +483,12 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     <section class="view" data-view="summary" hidden>
       <div class="view-label">集計</div>
       <div class="sub-toggle">
-        <button class="btn btn-fn active" data-sub="group">現在の差引</button>
+        <button class="btn btn-fn active" data-sub="group">現在の在庫</button>
         <button class="btn btn-fn" data-sub="period">期間集計</button>
       </div>
 
       <div id="sub-group">
-        <p class="muted" style="margin-bottom:10px;">種類別・品番別の現在の差引（入庫−出庫）</p>
+        <p class="muted" style="margin-bottom:10px;">種類別・品番別の現在の在庫（棚卸し基準＋入庫−出庫）</p>
         <div id="group-body"></div>
       </div>
 
@@ -785,6 +788,10 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     });
     saveStocktakes();
   }
+  function deleteStocktake(id) {
+    state.stocktakes = state.stocktakes.filter(s => s.id !== id);
+    saveStocktakes();
+  }
   // 現在庫 = 最後の棚卸し値 ＋ それ以降の(入庫−出庫)。棚卸しが無ければ全記録の差引
   function currentStock(code) {
     if (!code) return null;
@@ -916,10 +923,32 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
   }
 
   function renderHistory() {
-    const list = filterRecords(histFilter);
+    const recs = filterRecords(histFilter);
+    // 棚卸しも同じ絞り込み（品番・期間）で対象化
+    let sts = state.stocktakes.slice();
+    if (histFilter.q) { const q = normalizeCode(histFilter.q); sts = sts.filter(s => normalizeCode(s.code).indexOf(q) >= 0); }
+    const fs = dayStart(histFilter.from), fe = dayEnd(histFilter.to);
+    if (fs != null) sts = sts.filter(s => s.ts >= fs);
+    if (fe != null) sts = sts.filter(s => s.ts <= fe);
+    // 入出庫と棚卸しを統合して新しい順
+    const merged = recs.map(r => ({ kind: 'rec', ts: r.timestamp, r: r }))
+      .concat(sts.map(s => ({ kind: 'st', ts: s.ts, s: s })))
+      .sort((a, b) => b.ts - a.ts);
     const ul = $('#hist-list');
-    if (list.length === 0) { ul.innerHTML = '<div class="empty">記録がありません</div>'; return; }
-    ul.innerHTML = list.map(r => {
+    if (merged.length === 0) { ul.innerHTML = '<div class="empty">記録がありません</div>'; return; }
+    ul.innerHTML = merged.map(e => {
+      if (e.kind === 'st') {
+        const s = e.s;
+        return '<li class="rec-item stocktake" data-sid="' + s.id + '">'
+          + '<div class="rec-main">'
+          + '<div class="rec-time">' + fmtDateTime(s.ts) + '<span class="st-badge">棚卸し</span></div>'
+          + '<div class="rec-body"><span class="rec-code">' + escapeHtml(s.code) + '</span>'
+          + '<span class="rec-qty">在庫 ' + s.qty + '</span></div>'
+          + (s.name ? '<div class="rec-name">' + escapeHtml(s.name) + '</div>' : '')
+          + '</div>'
+          + '<div class="row-actions"><button class="mini-btn danger" data-sact="del">削除</button></div></li>';
+      }
+      const r = e.r;
       const dirCls = r.direction === 'in' ? 'in' : 'out';
       const dirTxt = r.direction === 'in' ? '入庫' : '出庫';
       return '<li class="rec-item' + (r.voided ? ' voided' : '') + '" data-rid="' + r.id + '">'
@@ -949,6 +978,13 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
 
   function renderGroup() {
     const groups = computeGroupBalance();
+    // 棚卸しだけで入出庫がまだ無い品番も一覧に含める
+    state.stocktakes.forEach(s => {
+      const it = state.items.find(x => x.code === s.code);
+      const cat = it ? catName(it.categoryId) : '未分類';
+      groups[cat] = groups[cat] || {};
+      if (!groups[cat][s.code]) groups[cat][s.code] = { name: s.name || (it ? it.name : ''), in: 0, out: 0 };
+    });
     const cats = Object.keys(groups);
     const box = $('#group-body');
     if (cats.length === 0) { box.innerHTML = '<div class="empty">記録がありません</div>'; return; }
@@ -959,11 +995,13 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
       const codes = Object.keys(groups[cat]).sort();
       codes.forEach(code => {
         const g = groups[cat][code];
-        const bal = g.in - g.out;
-        const cls = bal >= 0 ? 'bal-pos' : 'bal-neg';
+        const diff = g.in - g.out;
+        const stock = currentStock(code);
+        const cls = stock >= 0 ? 'bal-pos' : 'bal-neg';
         html += '<div class="group-row"><span class="g-code">' + escapeHtml(code)
-          + (g.name ? ' <span class="muted">' + escapeHtml(g.name) + '</span>' : '') + '</span>'
-          + '<span class="g-bal ' + cls + '">' + (bal >= 0 ? '+' : '') + bal + '</span></div>';
+          + (g.name ? ' <span class="muted">' + escapeHtml(g.name) + '</span>' : '')
+          + ' <span class="muted">差引' + (diff >= 0 ? '+' : '') + diff + '</span></span>'
+          + '<span class="g-bal ' + cls + '">在庫 ' + stock + '</span></div>';
       });
       html += '</div>';
     });
@@ -1301,6 +1339,15 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     });
     $('#hist-print').addEventListener('click', () => printReport('history'));
     $('#hist-list').addEventListener('click', e => {
+      // 棚卸し行の削除
+      const sBtn = e.target.closest('[data-sact]');
+      if (sBtn) {
+        const sli = e.target.closest('[data-sid]'); const id = sli.dataset.sid;
+        showModal('棚卸しを削除しますか？',
+          '<p>この棚卸し記録を削除します。削除すると、この棚卸しを基準にした在庫の計算が変わります。</p>',
+          [cancelBtn(), { label: '削除', cls: 'btn-danger', onClick: () => { deleteStocktake(id); closeModal(); renderHistory(); toast('棚卸しを削除しました'); } }]);
+        return;
+      }
       const btn = e.target.closest('[data-act]'); if (!btn) return;
       const li = e.target.closest('[data-rid]'); const r = state.records.find(x => x.id === li.dataset.rid);
       if (!r) return;
