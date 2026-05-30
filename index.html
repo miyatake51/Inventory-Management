@@ -286,6 +286,8 @@ body::before {
   background: var(--display-bg); color: var(--gold-light); font-family: 'DM Mono', monospace; font-size: 0.95rem;
 }
 .field input:focus, .field select:focus { outline: 2px solid var(--gold-dim); border-color: var(--gold); }
+.field input[type="date"] { cursor: pointer; color-scheme: dark; }
+.field input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.9; filter: invert(1); }
 .inline-fields { display: flex; gap: 8px; }
 .inline-fields .field { flex: 1; }
 
@@ -893,17 +895,14 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     cats.forEach(cat => {
       html += '<div class="group-cat"><h3>' + escapeHtml(cat) + '</h3>';
       const codes = Object.keys(groups[cat]).sort();
-      let catBal = 0;
       codes.forEach(code => {
         const g = groups[cat][code];
-        const bal = g.in - g.out; catBal += bal;
+        const bal = g.in - g.out;
         const cls = bal >= 0 ? 'bal-pos' : 'bal-neg';
         html += '<div class="group-row"><span class="g-code">' + escapeHtml(code)
           + (g.name ? ' <span class="muted">' + escapeHtml(g.name) + '</span>' : '') + '</span>'
           + '<span class="g-bal ' + cls + '">' + (bal >= 0 ? '+' : '') + bal + '</span></div>';
       });
-      html += '<div class="group-row" style="border-top:1px solid var(--gold-dim);"><span class="g-code muted">小計</span>'
-        + '<span class="g-bal ' + (catBal >= 0 ? 'bal-pos' : 'bal-neg') + '">' + (catBal >= 0 ? '+' : '') + catBal + '</span></div>';
       html += '</div>';
     });
     box.innerHTML = html;
@@ -915,17 +914,14 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     const codes = Object.keys(map).sort();
     const box = $('#period-body');
     if (codes.length === 0) { box.innerHTML = '<div class="empty">対象期間に記録がありません</div>'; return; }
-    let tin = 0, tout = 0;
     let rows = codes.map(code => {
-      const m = map[code]; const bal = m.in - m.out; tin += m.in; tout += m.out;
+      const m = map[code]; const bal = m.in - m.out;
       return '<tr><td class="code-col">' + escapeHtml(code) + '</td><td>' + m.in + '</td><td>' + m.out
         + '</td><td class="' + (bal >= 0 ? 'bal-pos' : 'bal-neg') + '">' + (bal >= 0 ? '+' : '') + bal + '</td></tr>';
     }).join('');
-    const tbal = tin - tout;
     box.innerHTML = '<div class="table-wrap"><table class="summary"><thead><tr>'
       + '<th class="code-col">品番</th><th>入庫計</th><th>出庫計</th><th>差引</th></tr></thead><tbody>'
-      + rows + '<tr class="total-row"><td class="code-col">合計</td><td>' + tin + '</td><td>' + tout
-      + '</td><td class="' + (tbal >= 0 ? 'bal-pos' : 'bal-neg') + '">' + (tbal >= 0 ? '+' : '') + tbal + '</td></tr>'
+      + rows
       + '</tbody></table></div>';
   }
 
@@ -1099,19 +1095,16 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
       const from = $('#per-from').value, to = $('#per-to').value;
       const map = computePeriod(from, to);
       const codes = Object.keys(map).sort();
-      let tin = 0, tout = 0;
       const rows = codes.map(code => {
-        const m = map[code]; const bal = m.in - m.out; tin += m.in; tout += m.out;
+        const m = map[code]; const bal = m.in - m.out;
         return '<tr><td class="l">' + escapeHtml(code) + '</td><td class="l">' + escapeHtml(m.name || '')
           + '</td><td>' + m.in + '</td><td>' + m.out + '</td><td>' + (bal >= 0 ? '+' : '') + bal + '</td></tr>';
       }).join('');
-      const tbal = tin - tout;
       area.innerHTML = '<h1>期間集計</h1>'
         + '<div class="print-meta">対象期間: ' + escapeHtml((from || '〜') + ' 〜 ' + (to || '〜'))
         + ' ／ 作成: ' + now + ' ／ 品番数: ' + codes.length + '件</div>'
         + '<table><thead><tr><th class="l">品番</th><th class="l">品名</th><th>入庫計</th><th>出庫計</th><th>差引</th></tr></thead><tbody>'
-        + rows + '<tr><td class="l"><strong>合計</strong></td><td></td><td>' + tin + '</td><td>' + tout
-        + '</td><td>' + (tbal >= 0 ? '+' : '') + tbal + '</td></tr></tbody></table>';
+        + rows + '</tbody></table>';
     }
     window.print();
   }
@@ -1275,6 +1268,11 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
 
     // モーダル背景クリックで閉じる
     $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+
+    // 日付欄：タップでカレンダーを開く（対応ブラウザのみ）
+    $$('input[type="date"]').forEach(inp => {
+      inp.addEventListener('click', () => { try { inp.showPicker(); } catch (e) {} });
+    });
   }
 
   /* ===== J. INIT ===== */
