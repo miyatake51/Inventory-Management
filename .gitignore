@@ -1,0 +1,18 @@
+# 機密・環境
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# エディタ・OS・ツール
+.DS_Store
+.claude/
+settings.local.json
+.claude/settings.local.json
+
+# 一時・確認用ファイル
+_*.html
