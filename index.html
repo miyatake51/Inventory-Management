@@ -640,6 +640,33 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
   function saveVoidlog() { writeKey(K.voidlog, state.voidlog); }
   function saveStocktakes() { writeKey(K.stocktakes, state.stocktakes); }
   function saveMeta()    { writeKey(K.meta, state.meta); }
+  // 複数ストアを一括保存。途中で失敗したら全キーを書き込み前の状態へ巻き戻す（部分書き込み防止）
+  function saveAll() {
+    const snap = {};
+    Object.keys(K).forEach(name => { snap[K[name]] = localStorage.getItem(K[name]); });
+    try {
+      localStorage.setItem(K.cats, JSON.stringify(state.categories));
+      localStorage.setItem(K.items, JSON.stringify(state.items));
+      localStorage.setItem(K.records, JSON.stringify(state.records));
+      localStorage.setItem(K.voidlog, JSON.stringify(state.voidlog));
+      localStorage.setItem(K.stocktakes, JSON.stringify(state.stocktakes));
+      localStorage.setItem(K.meta, JSON.stringify(state.meta));
+      return true;
+    } catch (e) {
+      // ロールバック（書き込み前の値に戻し、メモリ状態も再読み込みして一致させる）
+      try {
+        Object.keys(snap).forEach(key => {
+          if (snap[key] == null) localStorage.removeItem(key); else localStorage.setItem(key, snap[key]);
+        });
+        loadAll();
+      } catch (e2) {}
+      storageOK = false;
+      showModal('保存できませんでした',
+        '<p>端末の保存領域がいっぱいの可能性があります。直前の操作は取り消されました（データは壊れていません）。'
+        + 'JSON書き出しでバックアップしてください。</p>', [okBtn()]);
+      return false;
+    }
+  }
   function nextSeq(kind) {
     const f = { record: 'recordSeq', item: 'itemSeq', category: 'categorySeq', void: 'voidSeq' }[kind];
     state.meta[f] = (state.meta[f] || 0) + 1;
@@ -696,11 +723,12 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     state.categories = state.categories.filter(c => c.id !== id);
     // 所属品番は未分類へ
     state.items.forEach(it => { if (it.categoryId === id) it.categoryId = null; });
-    saveCats(); saveItems();
+    saveAll(); // カテゴリと品番を一括保存（途中失敗時はロールバック）
   }
   function addItem(code, name, categoryId) {
     code = (code || '').trim();
     if (!code) { toast('品番を入力してください'); return false; }
+    if (state.items.some(it => normalizeCode(it.code) === normalizeCode(code))) { toast('同じ品番が既に登録されています'); return false; }
     if (state.items.length >= 30) { toast('品番が多すぎます（30件まで）'); return false; }
     state.items.push({
       id: genId('i'), code, name: (name || '').trim(), categoryId: categoryId || null,
@@ -744,11 +772,18 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
   function editRecord(id, patch, reason) {
     const r = state.records.find(x => x.id === id);
     if (!r) return;
-    const before = { direction: r.direction, qty: r.qty, code: r.itemCodeSnap, name: r.itemNameSnap };
+    const before = { direction: r.direction, qty: r.qty, code: r.itemCodeSnap, name: r.itemNameSnap, category: r.categoryNameSnap };
     if (patch.direction) r.direction = patch.direction;
     if (patch.qty != null) r.qty = patch.qty;
     if (patch.code != null) r.itemCodeSnap = patch.code;
     if (patch.name != null) r.itemNameSnap = patch.name;
+    // 品番を変えたら、その品番に対応するマスタの種類スナップショットも合わせる
+    if (patch.code != null) {
+      const it = state.items.find(x => normalizeCode(x.code) === normalizeCode(patch.code));
+      r.itemId = it ? it.id : null;
+      r.categoryIdSnap = it ? it.categoryId : null;
+      r.categoryNameSnap = it ? catName(it.categoryId) : '未分類';
+    }
     r.editedAt = Date.now();
     logEntry('edit', r, { reason: reason || '', before, after: { direction: r.direction, qty: r.qty, code: r.itemCodeSnap, name: r.itemNameSnap } });
     saveRecords();
@@ -792,18 +827,21 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     state.stocktakes = state.stocktakes.filter(s => s.id !== id);
     saveStocktakes();
   }
+  function safeQty(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
   // 現在庫 = 最後の棚卸し値 ＋ それ以降の(入庫−出庫)。棚卸しが無ければ全記録の差引
   function currentStock(code) {
     if (!code) return null;
+    const nc = normalizeCode(code);
     let base = 0, anchorTs = -Infinity;
     state.stocktakes.forEach(s => {
-      if (s.code === code && s.ts >= anchorTs) { anchorTs = s.ts; base = s.qty; }
+      if (normalizeCode(s.code) === nc && s.ts >= anchorTs) { anchorTs = s.ts; base = safeQty(s.qty); }
     });
     let delta = 0;
     liveRecords().forEach(r => {
-      if (r.itemCodeSnap !== code) return;
-      if (r.timestamp <= anchorTs) return;
-      delta += (r.direction === 'in' ? r.qty : -r.qty);
+      if (normalizeCode(r.itemCodeSnap) !== nc) return;
+      if (r.timestamp < anchorTs) return;
+      const q = safeQty(r.qty);
+      delta += (r.direction === 'in' ? q : -q);
     });
     return base + delta;
   }
@@ -818,14 +856,18 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     if (fe != null) list = list.filter(r => r.timestamp <= fe);
     return sortRecords(list);
   }
+  // 種類IDでグルーピングし、表示名は現在のマスタ名で解決（カテゴリ名変更にも追従）
   function computeGroupBalance() {
-    const groups = {}; // categoryName → { codeSnap → {name, in, out} }
+    const groups = {}; // categoryId(or '__none') → { name, items: { codeSnap → {name,in,out} } }
     liveRecords().forEach(r => {
-      const cat = r.categoryNameSnap || '未分類';
+      const cid = r.categoryIdSnap || '__none';
+      const cname = catName(r.categoryIdSnap);
       const code = r.itemCodeSnap;
-      groups[cat] = groups[cat] || {};
-      groups[cat][code] = groups[cat][code] || { name: r.itemNameSnap, in: 0, out: 0 };
-      if (r.direction === 'in') groups[cat][code].in += r.qty; else groups[cat][code].out += r.qty;
+      groups[cid] = groups[cid] || { name: cname, items: {} };
+      groups[cid].name = cname;
+      groups[cid].items[code] = groups[cid].items[code] || { name: r.itemNameSnap, in: 0, out: 0 };
+      const q = safeQty(r.qty);
+      if (r.direction === 'in') groups[cid].items[code].in += q; else groups[cid].items[code].out += q;
     });
     return groups;
   }
@@ -836,7 +878,8 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
       if (fs != null && r.timestamp < fs) return;
       if (fe != null && r.timestamp > fe) return;
       map[r.itemCodeSnap] = map[r.itemCodeSnap] || { name: r.itemNameSnap, in: 0, out: 0 };
-      if (r.direction === 'in') map[r.itemCodeSnap].in += r.qty; else map[r.itemCodeSnap].out += r.qty;
+      const q = safeQty(r.qty);
+      if (r.direction === 'in') map[r.itemCodeSnap].in += q; else map[r.itemCodeSnap].out += q;
     });
     return map;
   }
@@ -980,21 +1023,22 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     const groups = computeGroupBalance();
     // 棚卸しだけで入出庫がまだ無い品番も一覧に含める
     state.stocktakes.forEach(s => {
-      const it = state.items.find(x => x.code === s.code);
-      const cat = it ? catName(it.categoryId) : '未分類';
-      groups[cat] = groups[cat] || {};
-      if (!groups[cat][s.code]) groups[cat][s.code] = { name: s.name || (it ? it.name : ''), in: 0, out: 0 };
+      const it = state.items.find(x => normalizeCode(x.code) === normalizeCode(s.code));
+      const cid = it ? (it.categoryId || '__none') : '__none';
+      const cname = it ? catName(it.categoryId) : '未分類';
+      groups[cid] = groups[cid] || { name: cname, items: {} };
+      if (!groups[cid].items[s.code]) groups[cid].items[s.code] = { name: s.name || (it ? it.name : ''), in: 0, out: 0 };
     });
-    const cats = Object.keys(groups);
+    const ids = Object.keys(groups);
     const box = $('#group-body');
-    if (cats.length === 0) { box.innerHTML = '<div class="empty">記録がありません</div>'; return; }
+    if (ids.length === 0) { box.innerHTML = '<div class="empty">記録がありません</div>'; return; }
     let html = '';
-    cats.sort();
-    cats.forEach(cat => {
-      html += '<div class="group-cat"><h3>' + escapeHtml(cat) + '</h3>';
-      const codes = Object.keys(groups[cat]).sort();
+    ids.sort((a, b) => groups[a].name.localeCompare(groups[b].name, 'ja'));
+    ids.forEach(cid => {
+      html += '<div class="group-cat"><h3>' + escapeHtml(groups[cid].name) + '</h3>';
+      const codes = Object.keys(groups[cid].items).sort();
       codes.forEach(code => {
-        const g = groups[cat][code];
+        const g = groups[cid].items[code];
         const diff = g.in - g.out;
         const stock = currentStock(code);
         const cls = stock >= 0 ? 'bal-pos' : 'bal-neg';
@@ -1144,6 +1188,11 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
       try { parsed = JSON.parse(reader.result); } catch (e) { toast('読み込めませんでした（JSON不正）'); return; }
       const d = parsed && parsed.data;
       if (!d || !Array.isArray(d.records) || !Array.isArray(d.items)) { toast('形式が違います'); return; }
+      // 数量が数値でない記録があれば取り込みを中止（NaN伝播で集計が壊れるのを防ぐ）
+      const badQty = d.records.some(r => !Number.isFinite(Number(r && r.qty)));
+      if (badQty) { toast('数量が不正なデータが含まれています。読み込みを中止しました'); return; }
+      const badStock = Array.isArray(d.stocktakes) && d.stocktakes.some(s => !Number.isFinite(Number(s && s.qty)));
+      if (badStock) { toast('棚卸しの数値が不正です。読み込みを中止しました'); return; }
       showModal('データを復元しますか？',
         '<p>現在のデータ（記録 ' + state.records.length + '件）を、読み込んだデータ（記録 '
         + d.records.length + '件）で<strong>すべて置き換え</strong>ます。<br><br>'
@@ -1153,13 +1202,12 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
             exportJSON(); // 取り込み前の自動退避
             state.categories = d.categories || [];
             state.items = d.items || [];
-            state.records = d.records || [];
+            state.records = (d.records || []).map(r => Object.assign({}, r, { qty: Number(r.qty) }));
             state.voidlog = d.voidlog || [];
-            state.stocktakes = d.stocktakes || [];
+            state.stocktakes = (d.stocktakes || []).map(s => Object.assign({}, s, { qty: Number(s.qty) }));
             state.meta = Object.assign(state.meta, d.meta || {});
-            saveCats(); saveItems(); saveRecords(); saveVoidlog(); saveStocktakes(); saveMeta();
-            closeModal(); showView('history');
-            toast('復元しました');
+            if (saveAll()) { closeModal(); showView('history'); toast('復元しました'); }
+            else { loadAll(); closeModal(); showView('history'); }
           }
         }]);
     };
@@ -1286,11 +1334,17 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
       + '<div class="field"><label>品名</label><input type="text" id="ei-name" value="' + escapeHtml(it.name || '') + '"></div>'
       + '<div class="field"><label>種類</label><select id="ei-cat"><option value="">未分類</option>'
       + state.categories.map(c => '<option value="' + c.id + '"' + (it.categoryId === c.id ? ' selected' : '') + '>' + escapeHtml(c.name) + '</option>').join('')
-      + '</select></div><p class="muted">※過去の記録は当時の値を保持します（この編集は影響しません）。</p>',
+      + '</select></div><p class="muted">※過去の記録は当時の品番で残ります。品番を変えると、その記録は新しい品番の在庫に合算されません。</p>',
       [cancelBtn(), {
         label: '保存', cls: 'btn-op', onClick: () => {
           const code = ($('#ei-code').value || '').trim();
           if (!code) { toast('品番を入力してください'); return false; }
+          const nc = normalizeCode(code);
+          if (state.items.some(x => x.id !== it.id && normalizeCode(x.code) === nc)) { toast('同じ品番が既にあります'); return false; }
+          // 品番コードを変える場合は、過去記録が旧品番に残る旨を警告して確認
+          if (normalizeCode(it.code) !== nc && state.records.some(r => normalizeCode(r.itemCodeSnap) === normalizeCode(it.code))) {
+            if (!confirm('品番を「' + it.code + '」から「' + code + '」に変更します。\n過去の記録は旧品番「' + it.code + '」のまま残り、新品番の在庫には合算されません。\n変更しますか？')) return false;
+          }
           it.code = code; it.name = ($('#ei-name').value || '').trim(); it.categoryId = $('#ei-cat').value || null;
           saveItems(); closeModal(); renderMaster(); toast('保存しました');
         }
