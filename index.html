@@ -765,27 +765,28 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
   function logEntry(action, rec, extra) {
     state.voidlog.push(Object.assign({
       id: genId('v'), seq: nextSeq('void'), action, recordId: rec.id, recordSeq: rec.seq,
-      at: Date.now(), snapshot: { direction: rec.direction, qty: rec.qty, code: rec.itemCodeSnap, timestamp: rec.timestamp }
+      at: Date.now(), snapshot: { direction: rec.direction, qty: rec.qty, code: rec.itemCodeSnap, isManual: rec.isManual, timestamp: rec.timestamp }
     }, extra || {}));
     saveVoidlog();
   }
   function editRecord(id, patch, reason) {
     const r = state.records.find(x => x.id === id);
     if (!r) return;
-    const before = { direction: r.direction, qty: r.qty, code: r.itemCodeSnap, name: r.itemNameSnap, category: r.categoryNameSnap };
-    if (patch.direction) r.direction = patch.direction;
+    const before = { direction: r.direction, qty: r.qty, code: r.itemCodeSnap, name: r.itemNameSnap, category: r.categoryNameSnap, isManual: r.isManual };
+    if (patch.direction != null) r.direction = patch.direction;
     if (patch.qty != null) r.qty = patch.qty;
     if (patch.code != null) r.itemCodeSnap = patch.code;
     if (patch.name != null) r.itemNameSnap = patch.name;
-    // 品番を変えたら、その品番に対応するマスタの種類スナップショットも合わせる
+    // 品番を変えたら、その品番に対応するマスタの種類・手入力フラグも合わせる
     if (patch.code != null) {
       const it = state.items.find(x => normalizeCode(x.code) === normalizeCode(patch.code));
       r.itemId = it ? it.id : null;
       r.categoryIdSnap = it ? it.categoryId : null;
       r.categoryNameSnap = it ? catName(it.categoryId) : '未分類';
+      r.isManual = !it; // マスタにあれば手入力でない、無ければ手入力扱い
     }
     r.editedAt = Date.now();
-    logEntry('edit', r, { reason: reason || '', before, after: { direction: r.direction, qty: r.qty, code: r.itemCodeSnap, name: r.itemNameSnap } });
+    logEntry('edit', r, { reason: reason || '', before, after: { direction: r.direction, qty: r.qty, code: r.itemCodeSnap, name: r.itemNameSnap, category: r.categoryNameSnap, isManual: r.isManual } });
     saveRecords();
   }
   function voidRecord(id, reason) {
@@ -860,8 +861,11 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
   function computeGroupBalance() {
     const groups = {}; // categoryId(or '__none') → { name, items: { codeSnap → {name,in,out} } }
     liveRecords().forEach(r => {
-      const cid = r.categoryIdSnap || '__none';
-      const cname = catName(r.categoryIdSnap);
+      // categoryIdSnap が無い古い記録は itemId 経由で現在のマスタから補完
+      let cidVal = r.categoryIdSnap;
+      if (cidVal == null && r.itemId) { const it = state.items.find(x => x.id === r.itemId); cidVal = it ? it.categoryId : null; }
+      const cid = cidVal || '__none';
+      const cname = catName(cidVal);
       const code = r.itemCodeSnap;
       groups[cid] = groups[cid] || { name: cname, items: {} };
       groups[cid].name = cname;
@@ -920,8 +924,8 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     bar.hidden = false;
     const now = currentStock(draft.item.code);
     const q = parseInt(draft.qty, 10);
-    let html = '在庫 <span class="now">' + now + '</span>';
-    if (q > 0 && draft.dir) {
+    let html = '在庫 <span class="now">' + (now == null ? '—' : now) + '</span>';
+    if (now != null && q > 0 && draft.dir) {
       const after = draft.dir === 'in' ? now + q : now - q;
       const cls = draft.dir === 'in' ? 'up' : 'down';
       html += '<span class="arrow">→</span><span class="after ' + cls + '">' + after + '</span><span class="muted">（記録後）</span>';
@@ -1041,11 +1045,12 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
         const g = groups[cid].items[code];
         const diff = g.in - g.out;
         const stock = currentStock(code);
-        const cls = stock >= 0 ? 'bal-pos' : 'bal-neg';
+        const cls = stock == null ? '' : (stock >= 0 ? 'bal-pos' : 'bal-neg');
+        const stockDisp = stock == null ? '—' : stock;
         html += '<div class="group-row"><span class="g-code">' + escapeHtml(code)
           + (g.name ? ' <span class="muted">' + escapeHtml(g.name) + '</span>' : '')
           + ' <span class="muted">差引' + (diff >= 0 ? '+' : '') + diff + '</span></span>'
-          + '<span class="g-bal ' + cls + '">在庫 ' + stock + '</span></div>';
+          + '<span class="g-bal ' + cls + '">在庫 ' + stockDisp + '</span></div>';
       });
       html += '</div>';
     });
@@ -1143,7 +1148,7 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
           const code = ($('#m-code').value || '').trim();
           if (!code) { toast('品番を入力してください'); return false; }
           draft.item = { itemId: null, code, name: '', isManual: true };
-          closeModal(); renderEntry();
+          renderEntry();
         }
       }]);
     setTimeout(() => {
@@ -1199,6 +1204,7 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
         + '念のため、置き換える前に現在のデータを自動でバックアップ書き出しします。</p>',
         [cancelBtn(), {
           label: '置き換える', cls: 'btn-op', onClick: () => {
+            closeModal(); // 確認モーダルを先に閉じる（失敗時のエラーモーダルを隠さないため）
             exportJSON(); // 取り込み前の自動退避
             state.categories = d.categories || [];
             state.items = d.items || [];
@@ -1206,8 +1212,9 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
             state.voidlog = d.voidlog || [];
             state.stocktakes = (d.stocktakes || []).map(s => Object.assign({}, s, { qty: Number(s.qty) }));
             state.meta = Object.assign(state.meta, d.meta || {});
-            if (saveAll()) { closeModal(); showView('history'); toast('復元しました'); }
-            else { loadAll(); closeModal(); showView('history'); }
+            if (saveAll()) { showView('history'); toast('復元しました'); }
+            else { loadAll(); showView('history'); } // エラー表示は saveAll 内モーダルに委ねる
+            return false; // 自動closeで saveAll のエラーモーダルを消さない
           }
         }]);
     };
@@ -1274,36 +1281,43 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
       const el = document.createElement('button');
       el.className = 'btn ' + (b.cls || 'btn-fn');
       el.textContent = b.label;
-      el.addEventListener('click', () => { if (b.onClick) { const r = b.onClick(); if (r !== false && b.label !== '使う' && b.cls !== 'btn-op') closeModal(); } else closeModal(); });
+      // onClick が false を返したら開いたまま、それ以外は自動で閉じる（文字列マッチに依存しない）
+      el.addEventListener('click', () => {
+        const keepOpen = b.onClick ? (b.onClick() === false) : false;
+        if (!keepOpen) closeModal();
+      });
       actions.appendChild(el);
     });
     $('#modal').hidden = false;
   }
   function closeModal() { $('#modal').hidden = true; }
-  function okBtn() { return { label: '閉じる', cls: 'btn-fn', onClick: closeModal }; }
-  function cancelBtn() { return { label: 'キャンセル', cls: 'btn-fn', onClick: closeModal }; }
+  // onClick を持たないボタンは showModal が自動で閉じる（二重closeを避けるため自前closeは付けない）
+  function okBtn() { return { label: '閉じる', cls: 'btn-fn' }; }
+  function cancelBtn() { return { label: 'キャンセル', cls: 'btn-fn' }; }
 
+  // closeModal は showModal が自動実行する。cb は「理由文字列」を受け取り、保存・表示更新だけ行えばよい
   function confirmReason(title, msg, actionLabel, actionCls, cb) {
     showModal(title,
       '<p>' + msg + '</p><div class="field"><label>理由（任意・記録に残ります）</label><input type="text" id="reason-input" placeholder="例: 数量打ち間違い"></div>',
-      [cancelBtn(), { label: actionLabel, cls: actionCls, onClick: () => { cb(($('#reason-input').value || '').trim()); closeModal(); } }]);
+      [cancelBtn(), { label: actionLabel, cls: actionCls, onClick: () => { cb(($('#reason-input').value || '').trim()); } }]);
   }
 
   // 棚卸し：実際に数えた在庫数に合わせ直す
   function openStocktake() {
     if (!draft.item) { toast('先に品番を選んでください'); return; }
     const now = currentStock(draft.item.code);
+    const nowNum = now == null ? 0 : now;
     showModal('在庫を合わせる（棚卸し）',
       '<p>「' + escapeHtml(draft.item.code) + '」の実際の在庫数を入力してください。<br>'
-      + 'いまの計算上の在庫は <strong>' + now + '</strong> です。</p>'
-      + '<div class="field"><label>実際の在庫数</label><input type="number" id="st-qty" inputmode="numeric" value="' + now + '"></div>'
+      + 'いまの計算上の在庫は <strong>' + nowNum + '</strong> です。</p>'
+      + '<div class="field"><label>実際の在庫数</label><input type="number" id="st-qty" inputmode="numeric" value="' + nowNum + '"></div>'
       + '<p class="muted">※この時点の在庫として確定します。以降の入庫・出庫で自動的に増減します。</p>',
       [cancelBtn(), {
         label: '確定', cls: 'btn-op', onClick: () => {
           const q = parseInt($('#st-qty').value, 10);
           if (isNaN(q) || q < 0) { toast('0以上の数で入力してください'); return false; }
           addStocktake(draft.item, q);
-          closeModal(); renderEntry(); toast('在庫を ' + q + ' に合わせました');
+          renderEntry(); toast('在庫を ' + q + ' に合わせました');
         }
       }]);
   }
@@ -1324,7 +1338,7 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
           const q = parseInt($('#e-qty').value, 10);
           if (!q || q <= 0) { toast('数量は正の数で入力してください'); return false; }
           editRecord(r.id, { code: code, name: ($('#e-name').value || '').trim(), direction: $('#e-dir').value, qty: q }, ($('#e-reason').value || '').trim());
-          closeModal(); renderHistory(); toast('編集しました');
+          renderHistory(); toast('編集しました');
         }
       }]);
   }
@@ -1341,12 +1355,21 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
           if (!code) { toast('品番を入力してください'); return false; }
           const nc = normalizeCode(code);
           if (state.items.some(x => x.id !== it.id && normalizeCode(x.code) === nc)) { toast('同じ品番が既にあります'); return false; }
-          // 品番コードを変える場合は、過去記録が旧品番に残る旨を警告して確認
-          if (normalizeCode(it.code) !== nc && state.records.some(r => normalizeCode(r.itemCodeSnap) === normalizeCode(it.code))) {
-            if (!confirm('品番を「' + it.code + '」から「' + code + '」に変更します。\n過去の記録は旧品番「' + it.code + '」のまま残り、新品番の在庫には合算されません。\n変更しますか？')) return false;
+          const name = ($('#ei-name').value || '').trim();
+          const cat = $('#ei-cat').value || null;
+          const doSave = () => { it.code = code; it.name = name; it.categoryId = cat; saveItems(); renderMaster(); toast('保存しました'); };
+          // 品番コードを変える場合は、過去記録が旧品番に残る旨を確認モーダルで警告
+          const codeChanged = normalizeCode(it.code) !== nc && state.records.some(r => normalizeCode(r.itemCodeSnap) === normalizeCode(it.code));
+          if (codeChanged) {
+            const oldCode = it.code;
+            closeModal();
+            showModal('品番変更の確認',
+              '<p>品番を「' + escapeHtml(oldCode) + '」→「' + escapeHtml(code) + '」に変更します。<br>'
+              + '過去の記録は旧品番「' + escapeHtml(oldCode) + '」のまま残り、新品番の在庫には合算されません。</p>',
+              [cancelBtn(), { label: '変更する', cls: 'btn-op', onClick: () => { doSave(); } }]);
+            return false; // 編集モーダルは閉じ済み・確認モーダルを残す
           }
-          it.code = code; it.name = ($('#ei-name').value || '').trim(); it.categoryId = $('#ei-cat').value || null;
-          saveItems(); closeModal(); renderMaster(); toast('保存しました');
+          doSave();
         }
       }]);
   }
@@ -1399,7 +1422,7 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
         const sli = e.target.closest('[data-sid]'); const id = sli.dataset.sid;
         showModal('棚卸しを削除しますか？',
           '<p>この棚卸し記録を削除します。削除すると、この棚卸しを基準にした在庫の計算が変わります。</p>',
-          [cancelBtn(), { label: '削除', cls: 'btn-danger', onClick: () => { deleteStocktake(id); closeModal(); renderHistory(); toast('棚卸しを削除しました'); } }]);
+          [cancelBtn(), { label: '削除', cls: 'btn-danger', onClick: () => { deleteStocktake(id); renderHistory(); toast('棚卸しを削除しました'); } }]);
         return;
       }
       const btn = e.target.closest('[data-act]'); if (!btn) return;
@@ -1424,7 +1447,7 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
       const b = e.target.closest('[data-cact]'); if (!b) return;
       const li = e.target.closest('[data-cid]'); const id = li.dataset.cid;
       showModal('種類を削除しますか？', '<p>この種類を削除します。所属する品番は「未分類」になります。過去記録には影響しません。</p>',
-        [cancelBtn(), { label: '削除', cls: 'btn-danger', onClick: () => { deleteCategory(id); closeModal(); renderMaster(); } }]);
+        [cancelBtn(), { label: '削除', cls: 'btn-danger', onClick: () => { deleteCategory(id); renderMaster(); } }]);
     });
     // マスタ：品番
     $('#item-add').addEventListener('click', () => {
@@ -1439,7 +1462,7 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
       if (b.dataset.iact === 'edit') openEditItem(it);
       if (b.dataset.iact === 'del') showModal('品番を削除しますか？',
         '<p>マスタから「' + escapeHtml(it.code) + '」を削除します。<br>過去の記録は当時の値で残ります。</p>',
-        [cancelBtn(), { label: '削除', cls: 'btn-danger', onClick: () => { deleteItem(it.id); closeModal(); renderMaster(); } }]);
+        [cancelBtn(), { label: '削除', cls: 'btn-danger', onClick: () => { deleteItem(it.id); renderMaster(); } }]);
     });
 
     // データ
