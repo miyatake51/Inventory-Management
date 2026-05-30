@@ -224,6 +224,19 @@ body::before {
 .btn-danger { background: #3a2630; color: #e9b6ab; box-shadow: 0 3px 0 #241419, 0 4px 8px rgba(0,0,0,0.35); }
 
 /* 方向トグル */
+/* 在庫バー */
+.stock-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: rgba(200,168,75,0.08); border: 1px solid var(--gold-dim); border-radius: 4px;
+  padding: 8px 12px; margin-bottom: 12px;
+}
+.stock-info { font-size: 0.9rem; color: var(--text-num); }
+.stock-info .now { font-family: 'DM Mono', monospace; color: var(--gold-light); font-size: 1.05rem; }
+.stock-info .after { font-family: 'DM Mono', monospace; font-size: 1.05rem; }
+.stock-info .after.up { color: var(--in); }
+.stock-info .after.down { color: var(--out); }
+.stock-info .arrow { color: var(--text-fn); margin: 0 6px; }
+
 .dir-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
 .dir-btn {
   height: 52px; border: 1px solid transparent; border-radius: var(--radius); cursor: pointer;
@@ -413,6 +426,11 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
         </div>
       </div>
 
+      <div class="stock-bar" id="stock-bar" hidden>
+        <div class="stock-info" id="stock-info"></div>
+        <button class="mini-btn" id="stocktake-btn">📋 在庫を合わせる</button>
+      </div>
+
       <div class="dir-toggle">
         <button class="dir-btn" data-dir="in">⬇ 入庫</button>
         <button class="dir-btn" data-dir="out">⬆ 出庫</button>
@@ -555,6 +573,7 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     items: 'inv_items',
     records: 'inv_records',
     voidlog: 'inv_voidlog',
+    stocktakes: 'inv_stocktakes',
     meta: 'inv_meta'
   };
   const SCHEMA = 1;
@@ -565,6 +584,7 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     items: [],
     records: [],
     voidlog: [],
+    stocktakes: [],
     meta: { schemaVersion: SCHEMA, recordSeq: 0, itemSeq: 0, categorySeq: 0, voidSeq: 0, lastBackupAt: null }
   };
   // 記録動線の一時状態
@@ -605,6 +625,7 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     state.items = readKey(K.items, []);
     state.records = readKey(K.records, []);
     state.voidlog = readKey(K.voidlog, []);
+    state.stocktakes = readKey(K.stocktakes, []);
     state.meta = Object.assign(
       { schemaVersion: SCHEMA, recordSeq: 0, itemSeq: 0, categorySeq: 0, voidSeq: 0, lastBackupAt: null },
       readKey(K.meta, {})
@@ -614,6 +635,7 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
   function saveItems()   { writeKey(K.items, state.items); }
   function saveRecords() { writeKey(K.records, state.records); }
   function saveVoidlog() { writeKey(K.voidlog, state.voidlog); }
+  function saveStocktakes() { writeKey(K.stocktakes, state.stocktakes); }
   function saveMeta()    { writeKey(K.meta, state.meta); }
   function nextSeq(kind) {
     const f = { record: 'recordSeq', item: 'itemSeq', category: 'categorySeq', void: 'voidSeq' }[kind];
@@ -755,6 +777,29 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     }).slice(0, 3);
   }
   function liveRecords() { return state.records.filter(r => !r.voided); }
+  // 棚卸し：その時点の在庫数を確定して合わせ直す
+  function addStocktake(item, qty) {
+    state.stocktakes.push({
+      id: genId('s'), ts: Date.now(),
+      code: item.code, name: item.name || '', qty: qty
+    });
+    saveStocktakes();
+  }
+  // 現在庫 = 最後の棚卸し値 ＋ それ以降の(入庫−出庫)。棚卸しが無ければ全記録の差引
+  function currentStock(code) {
+    if (!code) return null;
+    let base = 0, anchorTs = -Infinity;
+    state.stocktakes.forEach(s => {
+      if (s.code === code && s.ts >= anchorTs) { anchorTs = s.ts; base = s.qty; }
+    });
+    let delta = 0;
+    liveRecords().forEach(r => {
+      if (r.itemCodeSnap !== code) return;
+      if (r.timestamp <= anchorTs) return;
+      delta += (r.direction === 'in' ? r.qty : -r.qty);
+    });
+    return base + delta;
+  }
   function sortRecords(list) {
     return list.slice().sort((a, b) => b.timestamp - a.timestamp || b.seq - a.seq);
   }
@@ -815,6 +860,23 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     qtyEl.textContent = draft.qty;
     qtyEl.classList.remove('pulse'); void qtyEl.offsetWidth; qtyEl.classList.add('pulse');
     setTimeout(() => qtyEl.classList.remove('pulse'), 80);
+    renderStockBar();
+  }
+
+  // 在庫バー：選択中の品番の現在庫と、記録後の見込みを表示
+  function renderStockBar() {
+    const bar = $('#stock-bar'), info = $('#stock-info');
+    if (!draft.item) { bar.hidden = true; return; }
+    bar.hidden = false;
+    const now = currentStock(draft.item.code);
+    const q = parseInt(draft.qty, 10);
+    let html = '在庫 <span class="now">' + now + '</span>';
+    if (q > 0 && draft.dir) {
+      const after = draft.dir === 'in' ? now + q : now - q;
+      const cls = draft.dir === 'in' ? 'up' : 'down';
+      html += '<span class="arrow">→</span><span class="after ' + cls + '">' + after + '</span><span class="muted">（記録後）</span>';
+    }
+    info.innerHTML = html;
   }
 
   function renderEntry() {
@@ -1017,7 +1079,7 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
   function exportJSON() {
     state.meta.lastBackupAt = Date.now(); saveMeta();
     const payload = { schemaVersion: SCHEMA, exportedAt: new Date().toISOString(), data: {
-      categories: state.categories, items: state.items, records: state.records, voidlog: state.voidlog, meta: state.meta
+      categories: state.categories, items: state.items, records: state.records, voidlog: state.voidlog, stocktakes: state.stocktakes, meta: state.meta
     } };
     download('inventory_backup_' + fmtDate(Date.now()).replace(/\//g, '-') + '.json',
       new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
@@ -1055,8 +1117,9 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
             state.items = d.items || [];
             state.records = d.records || [];
             state.voidlog = d.voidlog || [];
+            state.stocktakes = d.stocktakes || [];
             state.meta = Object.assign(state.meta, d.meta || {});
-            saveCats(); saveItems(); saveRecords(); saveVoidlog(); saveMeta();
+            saveCats(); saveItems(); saveRecords(); saveVoidlog(); saveStocktakes(); saveMeta();
             closeModal(); showView('history');
             toast('復元しました');
           }
@@ -1140,6 +1203,25 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
       [cancelBtn(), { label: actionLabel, cls: actionCls, onClick: () => { cb(($('#reason-input').value || '').trim()); closeModal(); } }]);
   }
 
+  // 棚卸し：実際に数えた在庫数に合わせ直す
+  function openStocktake() {
+    if (!draft.item) { toast('先に品番を選んでください'); return; }
+    const now = currentStock(draft.item.code);
+    showModal('在庫を合わせる（棚卸し）',
+      '<p>「' + escapeHtml(draft.item.code) + '」の実際の在庫数を入力してください。<br>'
+      + 'いまの計算上の在庫は <strong>' + now + '</strong> です。</p>'
+      + '<div class="field"><label>実際の在庫数</label><input type="number" id="st-qty" inputmode="numeric" value="' + now + '"></div>'
+      + '<p class="muted">※この時点の在庫として確定します。以降の入庫・出庫で自動的に増減します。</p>',
+      [cancelBtn(), {
+        label: '確定', cls: 'btn-op', onClick: () => {
+          const q = parseInt($('#st-qty').value, 10);
+          if (isNaN(q) || q < 0) { toast('0以上の数で入力してください'); return false; }
+          addStocktake(draft.item, q);
+          closeModal(); renderEntry(); toast('在庫を ' + q + ' に合わせました');
+        }
+      }]);
+  }
+
   function openEditRecord(r) {
     showModal('記録の編集',
       '<div class="field"><label>品番</label><input type="text" id="e-code" value="' + escapeHtml(r.itemCodeSnap) + '"></div>'
@@ -1205,6 +1287,7 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
       b.classList.add('pressed'); setTimeout(() => b.classList.remove('pressed'), 120);
     });
     $('#commit-btn').addEventListener('click', commit);
+    $('#stocktake-btn').addEventListener('click', openStocktake);
 
     // 履歴
     $('#hist-apply').addEventListener('click', () => {
