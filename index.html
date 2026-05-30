@@ -717,11 +717,13 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
   function editRecord(id, patch, reason) {
     const r = state.records.find(x => x.id === id);
     if (!r) return;
-    const before = { direction: r.direction, qty: r.qty };
+    const before = { direction: r.direction, qty: r.qty, code: r.itemCodeSnap, name: r.itemNameSnap };
     if (patch.direction) r.direction = patch.direction;
     if (patch.qty != null) r.qty = patch.qty;
+    if (patch.code != null) r.itemCodeSnap = patch.code;
+    if (patch.name != null) r.itemNameSnap = patch.name;
     r.editedAt = Date.now();
-    logEntry('edit', r, { reason: reason || '', before, after: { direction: r.direction, qty: r.qty } });
+    logEntry('edit', r, { reason: reason || '', before, after: { direction: r.direction, qty: r.qty, code: r.itemCodeSnap, name: r.itemNameSnap } });
     saveRecords();
   }
   function voidRecord(id, reason) {
@@ -1147,15 +1149,20 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
 
   function openEditRecord(r) {
     showModal('記録の編集',
-      '<div class="field"><label>方向</label><select id="e-dir"><option value="in"' + (r.direction === 'in' ? ' selected' : '')
+      '<div class="field"><label>品番</label><input type="text" id="e-code" value="' + escapeHtml(r.itemCodeSnap) + '"></div>'
+      + '<div class="field"><label>品名</label><input type="text" id="e-name" value="' + escapeHtml(r.itemNameSnap || '') + '"></div>'
+      + '<div class="field"><label>方向</label><select id="e-dir"><option value="in"' + (r.direction === 'in' ? ' selected' : '')
       + '>入庫</option><option value="out"' + (r.direction === 'out' ? ' selected' : '') + '>出庫</option></select></div>'
       + '<div class="field"><label>数量</label><input type="number" id="e-qty" inputmode="numeric" value="' + r.qty + '"></div>'
-      + '<div class="field"><label>理由（任意）</label><input type="text" id="e-reason" placeholder="例: 数量訂正"></div>',
+      + '<div class="field"><label>理由（任意）</label><input type="text" id="e-reason" placeholder="例: 品番打ち間違い"></div>'
+      + '<p class="muted">※この記録だけを直します。品番マスタや他の記録には影響しません。</p>',
       [cancelBtn(), {
         label: '保存', cls: 'btn-op', onClick: () => {
+          const code = ($('#e-code').value || '').trim();
+          if (!code) { toast('品番を入力してください'); return false; }
           const q = parseInt($('#e-qty').value, 10);
           if (!q || q <= 0) { toast('数量は正の数で入力してください'); return false; }
-          editRecord(r.id, { direction: $('#e-dir').value, qty: q }, ($('#e-reason').value || '').trim());
+          editRecord(r.id, { code: code, name: ($('#e-name').value || '').trim(), direction: $('#e-dir').value, qty: q }, ($('#e-reason').value || '').trim());
           closeModal(); renderHistory(); toast('編集しました');
         }
       }]);
