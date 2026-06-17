@@ -737,7 +737,6 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     code = (code || '').trim();
     if (!code) { toast('品番を入力してください'); return false; }
     if (state.items.some(it => normalizeCode(it.code) === normalizeCode(code))) { toast('同じ品番が既に登録されています'); return false; }
-    if (state.items.length >= 30) { toast('品番が多すぎます（30件まで）'); return false; }
     state.items.push({
       id: genId('i'), code, name: (name || '').trim(), categoryId: categoryId || null,
       order: nextSeq('item'), active: true, createdAt: Date.now()
