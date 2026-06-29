@@ -78,8 +78,12 @@ fi
 # =============================================================================
 section "2/3 依存関係の脆弱性 (osv-scanner)"
 if has osv-scanner; then
-  if osv-scanner scan --recursive "$TARGET_DIR"; then
+  # 終了コード: 0=脆弱性なし / 1=脆弱性あり / 128=スキャン対象なし
+  osv-scanner scan --recursive "$TARGET_DIR"; osv_exit=$?
+  if [ "$osv_exit" -eq 0 ]; then
     ok "既知の脆弱性を持つ依存パッケージは検出されなかった。"
+  elif [ "$osv_exit" -eq 128 ]; then
+    warn "スキャン対象の依存マニフェスト（package.json 等）が無いためスキップ。"
   else
     ng "既知の脆弱性(CVE)を持つ依存パッケージが検出された。"
     ng "→ 該当パッケージを修正版へ更新すること。"
