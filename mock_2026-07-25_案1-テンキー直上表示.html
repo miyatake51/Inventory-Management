@@ -1,0 +1,1615 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>[モック] 入出庫記録 — Precision Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=DM+Mono:wght@300;400;500&family=Zen+Maru+Gothic:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ===== 1. TOKENS（calculator.html 流用） ===== */
+:root {
+  --bg: #ede8df;
+  --body: #141928;
+  --body-light: #1e2640;
+  --panel: #0f1424;
+  --display-bg: #0a0e1a;
+  --gold: #c8a84b;
+  --gold-light: #e2c97e;
+  --gold-dim: rgba(200,168,75,0.4);
+  --btn-num: #1c2338;
+  --btn-num-hover: #242e48;
+  --btn-op: #c8a84b;
+  --btn-op-hover: #d9bb60;
+  --btn-fn: #2a3050;
+  --btn-fn-hover: #333b60;
+  --text-num: #d8d0c4;
+  --text-fn: #9ba8c0;
+  --in: #6fbf8b;     /* 入庫=緑系 */
+  --in-dim: rgba(111,191,139,0.18);
+  --out: #d98a7a;    /* 出庫=赤系 */
+  --out-dim: rgba(217,138,122,0.18);
+  --danger: #d98a7a;
+  --radius: 3px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  min-height: 100vh;
+  background: var(--bg);
+  font-family: 'Zen Maru Gothic', sans-serif;
+  color: var(--text-num);
+}
+
+/* ===== 2. BASE / 背景・rise ===== */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c8a84b' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  pointer-events: none;
+  opacity: 0.6;
+  z-index: 0;
+}
+
+@keyframes rise { to { opacity: 1; transform: translateY(0); } }
+
+/* ===== 3. LAYOUT（筐体・ブランド・下部タブ） ===== */
+.app {
+  position: relative;
+  z-index: 1;
+  max-width: 460px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.brand {
+  text-align: center;
+  padding: 18px 0 10px;
+  animation: rise 0.8s cubic-bezier(0.16,1,0.3,1) forwards;
+  opacity: 0;
+  transform: translateY(24px);
+}
+.brand-name {
+  font-family: 'Cormorant Garamond', serif;
+  font-weight: 300;
+  font-style: italic;
+  font-size: 0.78rem;
+  letter-spacing: 0.5em;
+  color: #8a7a5a;
+  text-transform: uppercase;
+}
+.brand-rule { display: flex; align-items: center; gap: 10px; margin: 6px 14% 0; }
+.brand-rule::before, .brand-rule::after {
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-dim));
+}
+.brand-rule::after { background: linear-gradient(90deg, var(--gold-dim), transparent); }
+.brand-diamond { width: 5px; height: 5px; background: var(--gold); transform: rotate(45deg); opacity: 0.6; }
+
+.body-card {
+  background: var(--body);
+  border-radius: 12px;
+  margin: 8px 10px;
+  padding: 18px 16px 16px;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 2px 0 rgba(255,255,255,0.06) inset,
+    0 -1px 0 rgba(0,0,0,0.4) inset,
+    0 30px 60px rgba(14,18,30,0.4),
+    0 8px 24px rgba(14,18,30,0.3);
+  flex: 1;
+}
+/* 角ネジ */
+.body-card::before, .body-card::after, .screw-bl, .screw-br {
+  content: ''; position: absolute; width: 7px; height: 7px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #2a3250, #0d1020);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.body-card::before { top: 10px; left: 10px; }
+.body-card::after  { top: 10px; right: 10px; }
+.screw-bl { bottom: 10px; left: 10px; }
+.screw-br { bottom: 10px; right: 10px; }
+
+.view-label {
+  text-align: center;
+  font-size: 0.58rem;
+  letter-spacing: 0.45em;
+  color: rgba(150,160,190,0.4);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+/* 下部タブバー */
+.tabbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  padding: 8px 10px 12px;
+  background: linear-gradient(0deg, var(--bg) 70%, transparent);
+}
+.tab {
+  height: 46px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--btn-fn);
+  color: var(--text-fn);
+  font-family: 'Zen Maru Gothic', sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  box-shadow: 0 3px 0 #141a30, 0 4px 8px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
+  transition: transform .08s, box-shadow .08s, background .1s, color .1s;
+}
+.tab.active {
+  background: var(--gold);
+  color: var(--body);
+  transform: translateY(3px);
+  box-shadow: none;
+  font-weight: 600;
+}
+
+/* ===== 4. DISPLAY（確認表示部） ===== */
+.display {
+  background: var(--display-bg);
+  border-radius: 4px;
+  padding: 14px 18px 12px;
+  margin-bottom: 16px;
+  min-height: 92px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.04), 0 1px 0 rgba(255,255,255,0.06);
+}
+.display::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px);
+}
+.display-expr {
+  font-family: 'DM Mono', monospace; font-weight: 300; font-size: 0.78rem;
+  color: rgba(200,168,75,0.55); letter-spacing: 0.04em; min-height: 20px;
+  margin-bottom: 8px; position: relative; z-index: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.display-row { display: flex; align-items: flex-end; justify-content: space-between; position: relative; z-index: 1; }
+.display-dir {
+  font-family: 'Zen Maru Gothic', sans-serif; font-size: 0.95rem; letter-spacing: 0.1em;
+  padding: 2px 10px; border-radius: 3px; min-width: 64px; text-align: center;
+}
+.display-dir.is-in { color: var(--in); background: var(--in-dim); }
+.display-dir.is-out { color: var(--out); background: var(--out-dim); }
+.display-dir.is-none { color: rgba(150,160,190,0.4); }
+.display-main {
+  font-family: 'DM Mono', monospace; font-weight: 400; font-size: 2.4rem;
+  color: var(--gold-light); line-height: 1; text-shadow: 0 0 20px rgba(200,168,75,0.3);
+  transition: transform 0.06s ease;
+}
+.display-main.pulse { transform: scale(0.96); }
+.display-main.error { color: var(--danger); animation: shake .3s; }
+@keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
+
+/* ===== 5. BUTTONS ===== */
+.btn {
+  border: none; border-radius: var(--radius); cursor: pointer;
+  font-family: 'Zen Maru Gothic', sans-serif; font-weight: 500; letter-spacing: 0.04em;
+  transition: transform .08s, box-shadow .08s, background .1s; user-select: none; outline: none;
+}
+.btn:active, .btn.pressed { transform: translateY(3px); box-shadow: none !important; }
+
+.btn-num {
+  background: var(--btn-num); color: var(--text-num);
+  box-shadow: 0 3px 0 #0a0e18, 0 4px 8px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.btn-num:hover { background: var(--btn-num-hover); }
+.btn-op {
+  background: var(--btn-op); color: var(--body); font-weight: 600;
+  box-shadow: 0 3px 0 #8a6820, 0 4px 12px rgba(200,168,75,0.25), inset 0 1px 0 rgba(255,255,255,0.25);
+}
+.btn-op:hover { background: var(--btn-op-hover); }
+.btn-fn {
+  background: var(--btn-fn); color: var(--text-fn); font-size: 0.85rem; letter-spacing: 0.06em;
+  box-shadow: 0 3px 0 #141a30, 0 4px 8px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.btn-fn:hover { background: var(--btn-fn-hover); }
+.btn-danger { background: #3a2630; color: #e9b6ab; box-shadow: 0 3px 0 #241419, 0 4px 8px rgba(0,0,0,0.35); }
+
+/* 方向トグル */
+/* 在庫バー */
+.stock-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: rgba(200,168,75,0.08); border: 1px solid var(--gold-dim); border-radius: 4px;
+  padding: 8px 12px; margin-bottom: 12px;
+}
+.stock-info { font-size: 0.9rem; color: var(--text-num); }
+.stock-info .now { font-family: 'DM Mono', monospace; color: var(--gold-light); font-size: 1.05rem; }
+.stock-info .after { font-family: 'DM Mono', monospace; font-size: 1.05rem; }
+.stock-info .after.up { color: var(--in); }
+.stock-info .after.down { color: var(--out); }
+.stock-info .arrow { color: var(--text-fn); margin: 0 6px; }
+
+.dir-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.dir-btn {
+  height: 52px; border: 1px solid transparent; border-radius: var(--radius); cursor: pointer;
+  font-family: 'Zen Maru Gothic', sans-serif; font-size: 1.05rem; letter-spacing: 0.08em;
+  background: var(--btn-fn); color: var(--text-fn);
+  box-shadow: 0 3px 0 #141a30, 0 4px 8px rgba(0,0,0,0.35); transition: all .1s;
+}
+.dir-btn.sel-in { background: var(--in); color: #0c1a12; border-color: var(--in); box-shadow: 0 3px 0 #3f7a55, 0 4px 12px rgba(111,191,139,0.3); }
+.dir-btn.sel-out { background: var(--out); color: #2a100a; border-color: var(--out); box-shadow: 0 3px 0 #8f4f43, 0 4px 12px rgba(217,138,122,0.3); }
+.dir-btn:active { transform: translateY(3px); box-shadow: none !important; }
+
+/* 種類タブ */
+.cat-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.cat-tab {
+  padding: 6px 12px; border: none; border-radius: 20px; cursor: pointer;
+  font-family: 'Zen Maru Gothic', sans-serif; font-size: 0.8rem; letter-spacing: 0.04em;
+  background: var(--btn-fn); color: var(--text-fn); box-shadow: 0 2px 0 #141a30;
+}
+.cat-tab.active { background: var(--gold); color: var(--body); font-weight: 600; }
+
+/* 品番タイル */
+.item-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; max-height: 50vh; overflow-y: auto; padding: 2px; }
+.item-tile {
+  min-height: 58px; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--radius); cursor: pointer;
+  background: var(--btn-num); color: var(--text-num); text-align: left;
+  box-shadow: 0 3px 0 #0a0e18, 0 4px 8px rgba(0,0,0,0.4); transition: all .1s;
+  display: flex; flex-direction: column; justify-content: center; gap: 2px;
+}
+.item-tile:active { transform: translateY(3px); box-shadow: none !important; }
+.item-tile.selected { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold), 0 3px 0 #8a6820; }
+.item-tile .code { font-family: 'DM Mono', monospace; font-size: 0.95rem; color: var(--gold-light); }
+.item-tile .name { font-size: 0.78rem; color: var(--text-fn); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item-tile.manual { background: #20283f; }
+.item-tile.manual .code { color: var(--text-fn); }
+
+/* ===== 案1: テンキー直上の数量サブ表示 ===== */
+.entry-mini {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--display-bg); border-radius: 4px;
+  padding: 7px 14px; margin-bottom: 10px;
+  position: relative; overflow: hidden;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.04), 0 1px 0 rgba(255,255,255,0.06);
+}
+.entry-mini::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px);
+}
+.mini-dir {
+  font-family: 'Zen Maru Gothic', sans-serif; font-size: 0.82rem; letter-spacing: 0.08em;
+  padding: 2px 9px; border-radius: 3px; position: relative; z-index: 1; white-space: nowrap;
+}
+.mini-dir.is-in { color: var(--in); background: var(--in-dim); }
+.mini-dir.is-out { color: var(--out); background: var(--out-dim); }
+.mini-dir.is-none { color: rgba(150,160,190,0.4); }
+.mini-code {
+  font-family: 'DM Mono', monospace; font-size: 0.78rem; color: rgba(200,168,75,0.55);
+  position: relative; z-index: 1; flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mini-qty {
+  font-family: 'DM Mono', monospace; font-weight: 400; font-size: 1.9rem;
+  color: var(--gold-light); line-height: 1.15; text-shadow: 0 0 16px rgba(200,168,75,0.3);
+  position: relative; z-index: 1; transition: transform 0.06s ease;
+}
+.mini-qty.pulse { transform: scale(0.96); }
+.mini-qty.error { color: var(--danger); animation: shake .3s; }
+
+/* テンキー */
+.numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.numpad .btn { height: 56px; font-size: 1.3rem; }
+.numpad .btn-wide { grid-column: span 1; }
+
+.commit-btn { width: 100%; height: 60px; font-size: 1.25rem; }
+
+/* ===== 6. VIEWS ===== */
+.view { display: block; }
+.view[hidden] { display: none; }
+
+.section-title { font-size: 0.95rem; color: var(--gold-light); letter-spacing: 0.06em; margin: 6px 0 8px; }
+.muted { color: var(--text-fn); font-size: 0.82rem; }
+.empty { text-align: center; color: var(--text-fn); padding: 30px 10px; font-size: 0.9rem; }
+
+.row-actions { display: flex; gap: 6px; }
+.mini-btn { padding: 5px 10px; font-size: 0.72rem; border: none; border-radius: 3px; cursor: pointer; background: var(--btn-fn); color: var(--text-fn); }
+.mini-btn.gold { background: var(--gold); color: var(--body); font-weight: 600; }
+.mini-btn.danger { background: #3a2630; color: #e9b6ab; }
+
+.field { margin-bottom: 10px; }
+.field label { display: block; font-size: 0.78rem; color: var(--text-fn); margin-bottom: 4px; letter-spacing: 0.04em; }
+.field input, .field select {
+  width: 100%; height: 44px; padding: 0 12px; border: 1px solid #2a3050; border-radius: 4px;
+  background: var(--display-bg); color: var(--gold-light); font-family: 'DM Mono', monospace; font-size: 0.95rem;
+}
+.field input:focus, .field select:focus { outline: 2px solid var(--gold-dim); border-color: var(--gold); }
+.field input[type="date"] { cursor: pointer; color-scheme: dark; }
+.field input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.9; filter: invert(1); }
+.inline-fields { display: flex; gap: 8px; }
+.inline-fields .field { flex: 1; min-width: 0; overflow: hidden; }
+
+/* ===== 7. LISTS & TABLES ===== */
+.rec-list { list-style: none; }
+.rec-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 4px; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.rec-main { flex: 1; min-width: 0; cursor: pointer; }
+.rec-time { font-family: 'DM Mono', monospace; font-size: 0.72rem; color: var(--text-fn); }
+.rec-body { display: flex; align-items: baseline; gap: 8px; margin-top: 2px; }
+.rec-dir { font-size: 0.85rem; padding: 1px 7px; border-radius: 3px; }
+.rec-dir.in { color: var(--in); background: var(--in-dim); }
+.rec-dir.out { color: var(--out); background: var(--out-dim); }
+.rec-code { font-family: 'DM Mono', monospace; font-size: 0.9rem; color: var(--gold-light); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rec-qty { font-family: 'DM Mono', monospace; font-size: 1.05rem; color: var(--text-num); margin-left: auto; }
+.rec-name { font-size: 0.74rem; color: var(--text-fn); }
+.rec-item.voided { opacity: 0.45; }
+.rec-item.voided .rec-code { text-decoration: line-through; }
+.void-badge { font-size: 0.66rem; color: var(--out); border: 1px solid var(--out); border-radius: 3px; padding: 0 5px; margin-left: 6px; }
+.edited-badge { font-size: 0.66rem; color: var(--gold); margin-left: 6px; }
+.rec-item.stocktake { border-left: 2px solid var(--gold); padding-left: 8px; background: rgba(200,168,75,0.05); }
+.st-badge { font-size: 0.66rem; color: var(--gold); border: 1px solid var(--gold-dim); border-radius: 3px; padding: 0 5px; margin-left: 6px; }
+.rec-item.stocktake .rec-qty { color: var(--gold-light); }
+
+/* 履歴の詳細モーダル */
+.detail-list { display: flex; flex-direction: column; gap: 2px; }
+.detail-row { display: flex; gap: 10px; padding: 8px 2px; border-bottom: 1px solid rgba(255,255,255,0.07); }
+.detail-row .d-label { flex: 0 0 5.5em; color: var(--text-fn); font-size: 0.82rem; letter-spacing: 0.04em; }
+.detail-row .d-value { flex: 1; min-width: 0; color: var(--gold-light); font-size: 0.92rem; word-break: break-all; }
+.detail-row .d-value.mono { font-family: 'DM Mono', monospace; }
+
+.table-wrap { overflow-x: auto; }
+table.summary { width: 100%; border-collapse: collapse; font-family: 'DM Mono', monospace; font-size: 0.82rem; }
+table.summary th, table.summary td { padding: 8px 6px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.08); white-space: nowrap; }
+table.summary th { color: var(--gold); font-weight: 400; letter-spacing: 0.04em; }
+table.summary td.code-col, table.summary th.code-col { text-align: left; color: var(--gold-light); }
+table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: var(--gold-light); font-weight: 500; }
+.bal-pos { color: var(--in); }
+.bal-neg { color: var(--out); }
+
+.group-cat { margin-top: 14px; }
+.group-cat h3 { font-size: 0.9rem; color: var(--gold); letter-spacing: 0.08em; border-bottom: 1px solid var(--gold-dim); padding-bottom: 4px; margin-bottom: 6px; }
+.group-row { display: flex; justify-content: space-between; padding: 6px 2px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.group-row .g-code { font-family: 'DM Mono', monospace; color: var(--gold-light); font-size: 0.88rem; }
+.group-row .g-bal { font-family: 'DM Mono', monospace; font-size: 0.95rem; }
+
+.sub-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+.sub-toggle .btn { height: 44px; }
+.sub-toggle .btn.active { background: var(--gold); color: var(--body); transform: translateY(3px); box-shadow: none; }
+
+.data-actions { display: flex; flex-direction: column; gap: 10px; }
+.data-actions .btn { height: 52px; font-size: 1rem; }
+.warn-banner {
+  background: rgba(217,138,122,0.12); border: 1px solid var(--out); color: #e9b6ab;
+  border-radius: 4px; padding: 10px 12px; font-size: 0.82rem; margin-bottom: 12px; line-height: 1.5;
+}
+.info-banner {
+  background: rgba(200,168,75,0.08); border: 1px solid var(--gold-dim); color: var(--text-num);
+  border-radius: 4px; padding: 10px 12px; font-size: 0.8rem; margin-bottom: 12px; line-height: 1.5;
+}
+.similar-warn { color: var(--gold-light); font-size: 0.8rem; margin: 6px 0; }
+.similar-warn button { background: none; border: 1px solid var(--gold); color: var(--gold-light); border-radius: 3px; padding: 2px 8px; cursor: pointer; margin-left: 6px; font-size: 0.75rem; }
+
+/* ===== 8. MODAL / TOAST ===== */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(8,10,18,0.7); z-index: 50;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.modal-overlay[hidden] { display: none; }
+.modal {
+  background: var(--body); border-radius: 10px; padding: 22px 20px; width: 100%; max-width: 360px;
+  box-shadow: 0 30px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
+  animation: rise .3s cubic-bezier(0.16,1,0.3,1) forwards; opacity: 0; transform: translateY(24px);
+}
+.modal h3 { color: var(--gold-light); font-size: 1.05rem; margin-bottom: 12px; letter-spacing: 0.04em; }
+.modal p { color: var(--text-num); font-size: 0.9rem; line-height: 1.6; margin-bottom: 14px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+.modal-actions .btn { padding: 10px 18px; font-size: 0.9rem; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 80px; transform: translateX(-50%) translateY(20px);
+  background: var(--display-bg); color: var(--gold-light); border: 1px solid var(--gold-dim);
+  padding: 12px 20px; border-radius: 6px; font-size: 0.9rem; z-index: 60; opacity: 0;
+  transition: opacity .25s, transform .25s; box-shadow: 0 10px 30px rgba(0,0,0,0.4); pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ===== 9. RESPONSIVE ===== */
+@media (min-width: 640px) {
+  .item-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* ===== 10. PRINT（画面用と完全分離） ===== */
+#print-area { display: none; }
+@media print {
+  body { background: #fff; color: #000; }
+  body::before, .app, .toast, .modal-overlay { display: none !important; }
+  #print-area { display: block !important; color: #000; font-family: 'DM Mono', monospace; padding: 0; }
+  #print-area h1 { font-size: 16pt; margin-bottom: 4pt; font-family: 'Zen Maru Gothic', sans-serif; }
+  #print-area .print-meta { font-size: 9pt; margin-bottom: 12pt; color: #000; }
+  #print-area table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+  #print-area th, #print-area td { border: 1px solid #000; padding: 4pt 6pt; text-align: right; }
+  #print-area th { background: #eee; }
+  #print-area td.l, #print-area th.l { text-align: left; }
+  #print-area thead { display: table-header-group; }
+  #print-area tr { page-break-inside: avoid; }
+  @page { margin: 12mm; }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="brand">
+    <div class="brand-name">Precision Ledger</div>
+    <div class="brand-rule"><div class="brand-diamond"></div></div>
+  </div>
+
+  <div class="body-card">
+    <div class="screw-bl"></div>
+    <div class="screw-br"></div>
+
+    <!-- ===== 記録 ===== -->
+    <section class="view" data-view="entry">
+      <div class="view-label">入出庫 記録</div>
+      <div class="display">
+        <div class="display-expr" id="entry-expr">品番を選択してください</div>
+        <div class="display-row">
+          <div class="display-dir is-none" id="entry-dir">— —</div>
+          <div class="display-main" id="entry-qty">0</div>
+        </div>
+      </div>
+
+      <div class="stock-bar" id="stock-bar" hidden>
+        <div class="stock-info" id="stock-info"></div>
+        <button class="mini-btn" id="stocktake-btn">📋 在庫を合わせる</button>
+      </div>
+
+      <div class="dir-toggle">
+        <button class="dir-btn" data-dir="in">⬇ 入庫</button>
+        <button class="dir-btn" data-dir="out">⬆ 出庫</button>
+      </div>
+
+      <div class="cat-tabs" id="entry-cat-tabs"></div>
+      <div class="item-grid" id="entry-items"></div>
+      <div id="similar-warn-box"></div>
+
+      <div class="entry-mini">
+        <span class="mini-dir is-none" id="entry-mini-dir">— —</span>
+        <span class="mini-code" id="entry-mini-code"></span>
+        <span class="mini-qty" id="entry-mini-qty">0</span>
+      </div>
+
+      <div class="numpad">
+        <button class="btn btn-num" data-num="7">7</button>
+        <button class="btn btn-num" data-num="8">8</button>
+        <button class="btn btn-num" data-num="9">9</button>
+        <button class="btn btn-num" data-num="4">4</button>
+        <button class="btn btn-num" data-num="5">5</button>
+        <button class="btn btn-num" data-num="6">6</button>
+        <button class="btn btn-num" data-num="1">1</button>
+        <button class="btn btn-num" data-num="2">2</button>
+        <button class="btn btn-num" data-num="3">3</button>
+        <button class="btn btn-fn" data-num="clear">C</button>
+        <button class="btn btn-num" data-num="0">0</button>
+        <button class="btn btn-fn" data-num="back">⌫</button>
+      </div>
+
+      <button class="btn btn-op commit-btn" id="commit-btn">✓ 記録する</button>
+    </section>
+
+    <!-- ===== 履歴 ===== -->
+    <section class="view" data-view="history" hidden>
+      <div class="view-label">履歴</div>
+      <div class="inline-fields">
+        <div class="field"><label>品番でしぼる</label><input type="text" id="hist-q" placeholder="品番の一部"></div>
+      </div>
+      <div class="inline-fields">
+        <div class="field"><label>開始日</label><input type="date" id="hist-from"></div>
+        <div class="field"><label>終了日</label><input type="date" id="hist-to"></div>
+      </div>
+      <div class="row-actions" style="margin-bottom:12px;">
+        <button class="mini-btn gold" id="hist-apply">絞り込む</button>
+        <button class="mini-btn" id="hist-clear">解除</button>
+        <button class="mini-btn" id="hist-print" style="margin-left:auto;">🖨 印刷/PDF</button>
+      </div>
+      <ul class="rec-list" id="hist-list"></ul>
+    </section>
+
+    <!-- ===== 集計 ===== -->
+    <section class="view" data-view="summary" hidden>
+      <div class="view-label">集計</div>
+      <div class="sub-toggle">
+        <button class="btn btn-fn active" data-sub="group">現在の在庫</button>
+        <button class="btn btn-fn" data-sub="period">期間集計</button>
+      </div>
+
+      <div id="sub-group">
+        <p class="muted" style="margin-bottom:10px;">種類別・品番別の現在の在庫（棚卸し基準＋入庫−出庫）</p>
+        <div id="group-body"></div>
+      </div>
+
+      <div id="sub-period" hidden>
+        <div class="inline-fields">
+          <div class="field"><label>開始日</label><input type="date" id="per-from"></div>
+          <div class="field"><label>終了日</label><input type="date" id="per-to"></div>
+        </div>
+        <div class="row-actions" style="margin-bottom:12px;">
+          <button class="mini-btn gold" id="per-apply">集計する</button>
+          <button class="mini-btn" id="per-print" style="margin-left:auto;">🖨 印刷/PDF</button>
+        </div>
+        <div id="period-body"></div>
+      </div>
+    </section>
+
+    <!-- ===== マスタ ===== -->
+    <section class="view" data-view="master" hidden>
+      <div class="view-label">品番マスタ</div>
+
+      <div class="section-title">種類（カテゴリ）</div>
+      <div class="inline-fields">
+        <div class="field"><input type="text" id="cat-name" placeholder="種類名（例: 飲料）"></div>
+        <button class="mini-btn gold" id="cat-add" style="height:44px;">＋ 追加</button>
+      </div>
+      <ul class="rec-list" id="cat-list" style="margin-bottom:18px;"></ul>
+
+      <div class="section-title">品番</div>
+      <div class="field"><label>品番</label><input type="text" id="item-code" placeholder="例: A-001"></div>
+      <div class="field"><label>品名</label><input type="text" id="item-name" placeholder="例: コーラ500ml"></div>
+      <div class="field"><label>種類</label><select id="item-cat"></select></div>
+      <button class="btn btn-op" id="item-add" style="width:100%;height:50px;margin-bottom:14px;">＋ 品番を追加</button>
+      <ul class="rec-list" id="item-list"></ul>
+    </section>
+
+    <!-- ===== データ ===== -->
+    <section class="view" data-view="data" hidden>
+      <div class="view-label">データ</div>
+      <div class="info-banner" id="storage-info"></div>
+      <div class="warn-banner">
+        これは端末内の一時保存です。ブラウザのデータ削除や機種変更で消えることがあります。
+        定期的に「JSON書き出し」でバックアップを取ってください。
+      </div>
+      <div class="data-actions">
+        <button class="btn btn-op" id="export-json">JSON書き出し（バックアップ）</button>
+        <button class="btn btn-fn" id="import-json">JSON読み込み（復元）</button>
+        <button class="btn btn-fn" id="export-csv">CSV書き出し（表計算用）</button>
+      </div>
+      <input type="file" id="import-file" accept="application/json,.json" hidden>
+      <p class="muted" id="last-backup" style="margin-top:14px;text-align:center;"></p>
+    </section>
+
+  </div>
+
+  <nav class="tabbar">
+    <button class="tab active" data-go="entry">記録</button>
+    <button class="tab" data-go="history">履歴</button>
+    <button class="tab" data-go="summary">集計</button>
+    <button class="tab" data-go="master">マスタ</button>
+    <button class="tab" data-go="data">データ</button>
+  </nav>
+</div>
+
+<!-- 印刷専用コンテナ -->
+<div id="print-area"></div>
+
+<!-- 汎用モーダル -->
+<div class="modal-overlay" id="modal" hidden>
+  <div class="modal">
+    <h3 id="modal-title"></h3>
+    <div id="modal-content"></div>
+    <div class="modal-actions" id="modal-actions"></div>
+  </div>
+</div>
+
+<!-- トースト -->
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+(function () {
+  /* ===== A. CONSTANTS & KEYS ===== */
+  const K = {
+    cats: 'inv_categories',
+    items: 'inv_items',
+    records: 'inv_records',
+    voidlog: 'inv_voidlog',
+    stocktakes: 'inv_stocktakes',
+    meta: 'inv_meta'
+  };
+  const SCHEMA = 1;
+
+  /* ===== MOCK: 実 localStorage を使わない隔離ストア + サンプルデータ ===== */
+  const MOCK_STORE = {
+    'inv_categories': JSON.stringify([
+      { id: 'c1', name: 'ビス', order: 1 },
+      { id: 'c2', name: 'パイプ', order: 2 },
+      { id: 'c3', name: '金具', order: 3 }
+    ]),
+    'inv_items': JSON.stringify([
+      { id: 'i1', code: 'A-1001', name: '六角ボルト M8', categoryId: 'c1', order: 1, active: true, createdAt: 1 },
+      { id: 'i2', code: 'A-1002', name: '六角ボルト M10', categoryId: 'c1', order: 2, active: true, createdAt: 2 },
+      { id: 'i3', code: 'A-1030', name: 'フランジナット', categoryId: 'c1', order: 3, active: true, createdAt: 3 },
+      { id: 'i4', code: 'B-2010', name: '鋼管 50φ', categoryId: 'c2', order: 4, active: true, createdAt: 4 },
+      { id: 'i5', code: 'B-2011', name: '鋼管 60φ', categoryId: 'c2', order: 5, active: true, createdAt: 5 },
+      { id: 'i6', code: 'B-2045', name: 'エルボ管 25φ', categoryId: 'c2', order: 6, active: true, createdAt: 6 },
+      { id: 'i7', code: 'C-3001', name: 'L形アングル', categoryId: 'c3', order: 7, active: true, createdAt: 7 },
+      { id: 'i8', code: 'C-3002', name: 'ブラケット 小', categoryId: 'c3', order: 8, active: true, createdAt: 8 },
+      { id: 'i9', code: 'C-3050', name: '吐ージョイント', categoryId: 'c3', order: 9, active: true, createdAt: 9 },
+      { id: 'i10', code: 'D-4000', name: 'ワッシャー', categoryId: null, order: 10, active: true, createdAt: 10 }
+    ]),
+    'inv_meta': JSON.stringify({ schemaVersion: 1, recordSeq: 0, itemSeq: 10, categorySeq: 3, voidSeq: 0, lastBackupAt: null })
+  };
+
+  /* ===== B. STATE ===== */
+  let state = {
+    categories: [],
+    items: [],
+    records: [],
+    voidlog: [],
+    stocktakes: [],
+    meta: { schemaVersion: SCHEMA, recordSeq: 0, itemSeq: 0, categorySeq: 0, voidSeq: 0, lastBackupAt: null }
+  };
+  // 記録動線の一時状態
+  let draft = { catFilter: null, item: null, qty: '0', dir: null };
+  let summarySub = 'group';
+  let histFilter = { q: '', from: '', to: '' };
+  let storageOK = true;
+
+  /* ===== C. STORAGE ===== */
+  function readKey(key, fallback) {
+    try {
+      const raw = MOCK_STORE[key] == null ? null : MOCK_STORE[key];
+      if (raw == null) return fallback;
+      return JSON.parse(raw);
+    } catch (e) { return fallback; }
+  }
+  function writeKey(key, val) {
+    try {
+      MOCK_STORE[key] = JSON.stringify(val);
+      return true;
+    } catch (e) {
+      storageOK = false;
+      showModal('保存できませんでした',
+        '<p>端末の保存領域がいっぱい、またはプライベートモードの可能性があります。'
+        + 'データが失われる前にJSON書き出しでバックアップしてください。</p>', [okBtn()]);
+      return false;
+    }
+  }
+  function checkStorage() {
+    try {
+      /* MOCK: no-op */
+      storageOK = true;
+    } catch (e) { storageOK = false; }
+  }
+  function loadAll() {
+    state.categories = readKey(K.cats, []);
+    state.items = readKey(K.items, []);
+    state.records = readKey(K.records, []);
+    state.voidlog = readKey(K.voidlog, []);
+    state.stocktakes = readKey(K.stocktakes, []);
+    state.meta = Object.assign(
+      { schemaVersion: SCHEMA, recordSeq: 0, itemSeq: 0, categorySeq: 0, voidSeq: 0, lastBackupAt: null },
+      readKey(K.meta, {})
+    );
+  }
+  function saveCats()    { writeKey(K.cats, state.categories); }
+  function saveItems()   { writeKey(K.items, state.items); }
+  function saveRecords() { writeKey(K.records, state.records); }
+  function saveVoidlog() { writeKey(K.voidlog, state.voidlog); }
+  function saveStocktakes() { writeKey(K.stocktakes, state.stocktakes); }
+  function saveMeta()    { writeKey(K.meta, state.meta); }
+  // 複数ストアを一括保存。途中で失敗したら全キーを書き込み前の状態へ巻き戻す（部分書き込み防止）
+  function saveAll() {
+    const snap = {};
+    Object.keys(K).forEach(name => { snap[K[name]] = localStorage.getItem(K[name]); });
+    try {
+      localStorage.setItem(K.cats, JSON.stringify(state.categories));
+      localStorage.setItem(K.items, JSON.stringify(state.items));
+      localStorage.setItem(K.records, JSON.stringify(state.records));
+      localStorage.setItem(K.voidlog, JSON.stringify(state.voidlog));
+      localStorage.setItem(K.stocktakes, JSON.stringify(state.stocktakes));
+      localStorage.setItem(K.meta, JSON.stringify(state.meta));
+      return true;
+    } catch (e) {
+      // ロールバック（書き込み前の値に戻し、メモリ状態も再読み込みして一致させる）
+      try {
+        Object.keys(snap).forEach(key => {
+          if (snap[key] == null) localStorage.removeItem(key); else localStorage.setItem(key, snap[key]);
+        });
+        loadAll();
+      } catch (e2) {}
+      storageOK = false;
+      showModal('保存できませんでした',
+        '<p>端末の保存領域がいっぱいの可能性があります。直前の操作は取り消されました（データは壊れていません）。'
+        + 'JSON書き出しでバックアップしてください。</p>', [okBtn()]);
+      return false;
+    }
+  }
+  function nextSeq(kind) {
+    const f = { record: 'recordSeq', item: 'itemSeq', category: 'categorySeq', void: 'voidSeq' }[kind];
+    state.meta[f] = (state.meta[f] || 0) + 1;
+    saveMeta();
+    return state.meta[f];
+  }
+
+  /* ===== D. UTIL ===== */
+  function genId(prefix) { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function fmtDateTime(ts) {
+    const d = new Date(ts);
+    return d.getFullYear() + '/' + pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function fmtDate(ts) {
+    const d = new Date(ts);
+    return d.getFullYear() + '/' + pad(d.getMonth() + 1) + '/' + pad(d.getDate());
+  }
+  // "YYYY-MM-DD" → 当日の開始/終了 epoch（ローカル時刻）
+  function dayStart(str) { if (!str) return null; const [y, m, d] = str.split('-').map(Number); return new Date(y, m - 1, d, 0, 0, 0, 0).getTime(); }
+  function dayEnd(str)   { if (!str) return null; const [y, m, d] = str.split('-').map(Number); return new Date(y, m - 1, d, 23, 59, 59, 999).getTime(); }
+  function normalizeCode(s) {
+    return String(s || '')
+      .replace(/[Ａ-Ｚａ-ｚ０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+      .replace(/\s+/g, '')
+      .toUpperCase();
+  }
+  function levenshtein(a, b) {
+    a = a || ''; b = b || '';
+    const m = a.length, n = b.length;
+    if (!m) return n; if (!n) return m;
+    const dp = Array.from({ length: m + 1 }, (_, i) => [i].concat(new Array(n).fill(0)));
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++)
+      for (let j = 1; j <= n; j++)
+        dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return dp[m][n];
+  }
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function catName(id) { const c = state.categories.find(x => x.id === id); return c ? c.name : '未分類'; }
+
+  /* ===== E. DOMAIN ===== */
+  function addCategory(name) {
+    name = (name || '').trim();
+    if (!name) return false;
+    if (state.categories.some(c => c.name === name)) { toast('同じ種類が既にあります'); return false; }
+    state.categories.push({ id: genId('c'), name, order: nextSeq('category') });
+    saveCats();
+    return true;
+  }
+  function deleteCategory(id) {
+    state.categories = state.categories.filter(c => c.id !== id);
+    // 所属品番は未分類へ
+    state.items.forEach(it => { if (it.categoryId === id) it.categoryId = null; });
+    saveAll(); // カテゴリと品番を一括保存（途中失敗時はロールバック）
+  }
+  function addItem(code, name, categoryId) {
+    code = (code || '').trim();
+    if (!code) { toast('品番を入力してください'); return false; }
+    if (state.items.some(it => normalizeCode(it.code) === normalizeCode(code))) { toast('同じ品番が既に登録されています'); return false; }
+    state.items.push({
+      id: genId('i'), code, name: (name || '').trim(), categoryId: categoryId || null,
+      order: nextSeq('item'), active: true, createdAt: Date.now()
+    });
+    saveItems();
+    return true;
+  }
+  function deleteItem(id) {
+    state.items = state.items.filter(it => it.id !== id);
+    saveItems();
+  }
+  function makeSnapshot(itemId, manualCode) {
+    if (manualCode != null) {
+      return { itemId: null, code: manualCode, name: '', categoryId: null, categoryName: '未分類', isManual: true };
+    }
+    const it = state.items.find(x => x.id === itemId);
+    if (!it) return null;
+    return { itemId: it.id, code: it.code, name: it.name, categoryId: it.categoryId, categoryName: catName(it.categoryId), isManual: false };
+  }
+  function addRecord(snap, dir, qty) {
+    const ts = Date.now();
+    const rec = {
+      id: genId('r'), seq: nextSeq('record'), timestamp: ts, createdAt: ts,
+      direction: dir, qty: qty,
+      itemId: snap.itemId, itemCodeSnap: snap.code, itemNameSnap: snap.name,
+      categoryIdSnap: snap.categoryId, categoryNameSnap: snap.categoryName,
+      isManual: snap.isManual, voided: false, editedAt: null
+    };
+    state.records.push(rec);
+    saveRecords();
+    return rec;
+  }
+  function logEntry(action, rec, extra) {
+    state.voidlog.push(Object.assign({
+      id: genId('v'), seq: nextSeq('void'), action, recordId: rec.id, recordSeq: rec.seq,
+      at: Date.now(), snapshot: { direction: rec.direction, qty: rec.qty, code: rec.itemCodeSnap, isManual: rec.isManual, timestamp: rec.timestamp }
+    }, extra || {}));
+    saveVoidlog();
+  }
+  function editRecord(id, patch, reason) {
+    const r = state.records.find(x => x.id === id);
+    if (!r) return;
+    const before = { direction: r.direction, qty: r.qty, code: r.itemCodeSnap, name: r.itemNameSnap, category: r.categoryNameSnap, isManual: r.isManual };
+    if (patch.direction != null) r.direction = patch.direction;
+    if (patch.qty != null) r.qty = patch.qty;
+    if (patch.code != null) r.itemCodeSnap = patch.code;
+    if (patch.name != null) r.itemNameSnap = patch.name;
+    // 品番を変えたら、その品番に対応するマスタの種類・手入力フラグも合わせる
+    if (patch.code != null) {
+      const it = state.items.find(x => normalizeCode(x.code) === normalizeCode(patch.code));
+      r.itemId = it ? it.id : null;
+      r.categoryIdSnap = it ? it.categoryId : null;
+      r.categoryNameSnap = it ? catName(it.categoryId) : '未分類';
+      r.isManual = !it; // マスタにあれば手入力でない、無ければ手入力扱い
+    }
+    r.editedAt = Date.now();
+    logEntry('edit', r, { reason: reason || '', before, after: { direction: r.direction, qty: r.qty, code: r.itemCodeSnap, name: r.itemNameSnap, category: r.categoryNameSnap, isManual: r.isManual } });
+    saveRecords();
+  }
+  function voidRecord(id, reason) {
+    const r = state.records.find(x => x.id === id);
+    if (!r) return;
+    r.voided = true;
+    logEntry('void', r, { reason: reason || '' });
+    saveRecords();
+  }
+  function deleteRecord(id, reason) {
+    const r = state.records.find(x => x.id === id);
+    if (!r) return;
+    logEntry('delete', r, { reason: reason || '' });
+    state.records = state.records.filter(x => x.id !== id);
+    saveRecords();
+  }
+  function promoteManual(rec) {
+    if (!addItem(rec.itemCodeSnap, rec.itemNameSnap, null)) return;
+    toast('マスタに追加しました');
+  }
+  function findSimilar(input) {
+    const ni = normalizeCode(input);
+    if (!ni) return [];
+    return state.items.filter(it => {
+      const nc = normalizeCode(it.code);
+      return nc !== ni && (nc.startsWith(ni) || ni.startsWith(nc) || levenshtein(nc, ni) <= 1);
+    }).slice(0, 3);
+  }
+  function liveRecords() { return state.records.filter(r => !r.voided); }
+  // 棚卸し：その時点の在庫数を確定して合わせ直す
+  function addStocktake(item, qty) {
+    state.stocktakes.push({
+      id: genId('s'), ts: Date.now(),
+      code: item.code, name: item.name || '', qty: qty
+    });
+    saveStocktakes();
+  }
+  function deleteStocktake(id) {
+    state.stocktakes = state.stocktakes.filter(s => s.id !== id);
+    saveStocktakes();
+  }
+  function safeQty(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+  // 現在庫 = 最後の棚卸し値 ＋ それ以降の(入庫−出庫)。棚卸しが無ければ全記録の差引
+  function currentStock(code) {
+    if (!code) return null;
+    const nc = normalizeCode(code);
+    let base = 0, anchorTs = -Infinity;
+    state.stocktakes.forEach(s => {
+      if (normalizeCode(s.code) === nc && s.ts >= anchorTs) { anchorTs = s.ts; base = safeQty(s.qty); }
+    });
+    let delta = 0;
+    liveRecords().forEach(r => {
+      if (normalizeCode(r.itemCodeSnap) !== nc) return;
+      if (r.timestamp < anchorTs) return;
+      const q = safeQty(r.qty);
+      delta += (r.direction === 'in' ? q : -q);
+    });
+    return base + delta;
+  }
+  function sortRecords(list) {
+    return list.slice().sort((a, b) => b.timestamp - a.timestamp || b.seq - a.seq);
+  }
+  function filterRecords(f) {
+    let list = state.records.slice();
+    if (f.q) { const q = normalizeCode(f.q); list = list.filter(r => normalizeCode(r.itemCodeSnap).indexOf(q) >= 0); }
+    const fs = dayStart(f.from), fe = dayEnd(f.to);
+    if (fs != null) list = list.filter(r => r.timestamp >= fs);
+    if (fe != null) list = list.filter(r => r.timestamp <= fe);
+    return sortRecords(list);
+  }
+  // 種類IDでグルーピングし、表示名は現在のマスタ名で解決（カテゴリ名変更にも追従）
+  function computeGroupBalance() {
+    const groups = {}; // categoryId(or '__none') → { name, items: { codeSnap → {name,in,out} } }
+    liveRecords().forEach(r => {
+      // categoryIdSnap が無い古い記録は itemId 経由で現在のマスタから補完
+      let cidVal = r.categoryIdSnap;
+      if (cidVal == null && r.itemId) { const it = state.items.find(x => x.id === r.itemId); cidVal = it ? it.categoryId : null; }
+      const cid = cidVal || '__none';
+      const cname = catName(cidVal);
+      const code = r.itemCodeSnap;
+      groups[cid] = groups[cid] || { name: cname, items: {} };
+      groups[cid].name = cname;
+      groups[cid].items[code] = groups[cid].items[code] || { name: r.itemNameSnap, in: 0, out: 0 };
+      const q = safeQty(r.qty);
+      if (r.direction === 'in') groups[cid].items[code].in += q; else groups[cid].items[code].out += q;
+    });
+    return groups;
+  }
+  function computePeriod(fromStr, toStr) {
+    const fs = dayStart(fromStr), fe = dayEnd(toStr);
+    const map = {}; // code → {name, in, out}
+    liveRecords().forEach(r => {
+      if (fs != null && r.timestamp < fs) return;
+      if (fe != null && r.timestamp > fe) return;
+      map[r.itemCodeSnap] = map[r.itemCodeSnap] || { name: r.itemNameSnap, in: 0, out: 0 };
+      const q = safeQty(r.qty);
+      if (r.direction === 'in') map[r.itemCodeSnap].in += q; else map[r.itemCodeSnap].out += q;
+    });
+    return map;
+  }
+
+  /* ===== F. RENDER ===== */
+  const $ = sel => document.querySelector(sel);
+  const $$ = sel => Array.prototype.slice.call(document.querySelectorAll(sel));
+
+  function showView(name) {
+    $$('.view').forEach(v => { v.hidden = v.dataset.view !== name; });
+    $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.go === name));
+    if (name === 'entry') renderEntry();
+    if (name === 'history') renderHistory();
+    if (name === 'summary') renderSummary();
+    if (name === 'master') renderMaster();
+    if (name === 'data') renderData();
+  }
+
+  function renderEntryDisplay() {
+    const expr = $('#entry-expr'), dirEl = $('#entry-dir'), qtyEl = $('#entry-qty');
+    const miniDir = $('#entry-mini-dir'), miniQty = $('#entry-mini-qty'), miniCode = $('#entry-mini-code');
+    if (draft.item) {
+      expr.textContent = draft.item.code + (draft.item.name ? '  ' + draft.item.name : '') + (draft.item.isManual ? '  (手入力)' : '');
+    } else {
+      expr.textContent = '品番を選択してください';
+    }
+    dirEl.className = 'display-dir ' + (draft.dir === 'in' ? 'is-in' : draft.dir === 'out' ? 'is-out' : 'is-none');
+    dirEl.textContent = draft.dir === 'in' ? '⬇ 入庫' : draft.dir === 'out' ? '⬆ 出庫' : '— —';
+    qtyEl.textContent = draft.qty;
+    qtyEl.classList.remove('pulse'); void qtyEl.offsetWidth; qtyEl.classList.add('pulse');
+    setTimeout(() => qtyEl.classList.remove('pulse'), 80);
+    miniDir.className = 'mini-dir ' + (draft.dir === 'in' ? 'is-in' : draft.dir === 'out' ? 'is-out' : 'is-none');
+    miniDir.textContent = draft.dir === 'in' ? '⬇ 入庫' : draft.dir === 'out' ? '⬆ 出庫' : '— —';
+    miniCode.textContent = draft.item ? draft.item.code : '';
+    miniQty.textContent = draft.qty;
+    miniQty.classList.remove('pulse'); void miniQty.offsetWidth; miniQty.classList.add('pulse');
+    setTimeout(() => miniQty.classList.remove('pulse'), 80);
+    renderStockBar();
+  }
+
+  // 在庫バー：選択中の品番の現在庫と、記録後の見込みを表示
+  function renderStockBar() {
+    const bar = $('#stock-bar'), info = $('#stock-info');
+    if (!draft.item) { bar.hidden = true; return; }
+    bar.hidden = false;
+    const now = currentStock(draft.item.code);
+    const q = parseInt(draft.qty, 10);
+    let html = '在庫 <span class="now">' + (now == null ? '—' : now) + '</span>';
+    if (now != null && q > 0 && draft.dir) {
+      const after = draft.dir === 'in' ? now + q : now - q;
+      const cls = draft.dir === 'in' ? 'up' : 'down';
+      html += '<span class="arrow">→</span><span class="after ' + cls + '">' + after + '</span><span class="muted">（記録後）</span>';
+    }
+    info.innerHTML = html;
+  }
+
+  function renderEntry() {
+    // 種類タブ
+    const tabs = $('#entry-cat-tabs');
+    let html = '<button class="cat-tab' + (draft.catFilter === null ? ' active' : '') + '" data-cat="">すべて</button>';
+    state.categories.slice().sort((a, b) => a.order - b.order).forEach(c => {
+      html += '<button class="cat-tab' + (draft.catFilter === c.id ? ' active' : '') + '" data-cat="' + c.id + '">' + escapeHtml(c.name) + '</button>';
+    });
+    tabs.innerHTML = html;
+
+    // 品番タイル
+    const grid = $('#entry-items');
+    let items = state.items.filter(it => it.active);
+    if (draft.catFilter !== null) items = items.filter(it => it.categoryId === draft.catFilter);
+    items.sort((a, b) => a.order - b.order);
+    let g = '';
+    items.forEach(it => {
+      const sel = draft.item && draft.item.itemId === it.id ? ' selected' : '';
+      g += '<button class="item-tile' + sel + '" data-item="' + it.id + '">'
+        + '<span class="code">' + escapeHtml(it.code) + '</span>'
+        + '<span class="name">' + escapeHtml(it.name || '') + '</span></button>';
+    });
+    g += '<button class="item-tile manual" data-manual="1"><span class="code">✎ 手入力</span><span class="name">リスト外品番</span></button>';
+    if (state.items.length === 0) {
+      g = '<div class="empty" style="grid-column:1/-1;">品番が未登録です。<br>「マスタ」タブで品番を追加してください。</div>' + g;
+    }
+    grid.innerHTML = g;
+
+    $$('.dir-btn').forEach(b => {
+      b.classList.remove('sel-in', 'sel-out');
+      if (draft.dir === 'in' && b.dataset.dir === 'in') b.classList.add('sel-in');
+      if (draft.dir === 'out' && b.dataset.dir === 'out') b.classList.add('sel-out');
+    });
+    $('#similar-warn-box').innerHTML = '';
+    renderEntryDisplay();
+  }
+
+  function renderHistory() {
+    const recs = filterRecords(histFilter);
+    // 棚卸しも同じ絞り込み（品番・期間）で対象化
+    let sts = state.stocktakes.slice();
+    if (histFilter.q) { const q = normalizeCode(histFilter.q); sts = sts.filter(s => normalizeCode(s.code).indexOf(q) >= 0); }
+    const fs = dayStart(histFilter.from), fe = dayEnd(histFilter.to);
+    if (fs != null) sts = sts.filter(s => s.ts >= fs);
+    if (fe != null) sts = sts.filter(s => s.ts <= fe);
+    // 入出庫と棚卸しを統合して新しい順
+    const merged = recs.map(r => ({ kind: 'rec', ts: r.timestamp, r: r }))
+      .concat(sts.map(s => ({ kind: 'st', ts: s.ts, s: s })))
+      .sort((a, b) => b.ts - a.ts);
+    const ul = $('#hist-list');
+    if (merged.length === 0) { ul.innerHTML = '<div class="empty">記録がありません</div>'; return; }
+    ul.innerHTML = merged.map(e => {
+      if (e.kind === 'st') {
+        const s = e.s;
+        return '<li class="rec-item stocktake" data-sid="' + s.id + '">'
+          + '<div class="rec-main">'
+          + '<div class="rec-time">' + fmtDateTime(s.ts) + '<span class="st-badge">棚卸し</span></div>'
+          + '<div class="rec-body"><span class="rec-code">' + escapeHtml(s.code) + '</span>'
+          + '<span class="rec-qty">在庫 ' + s.qty + '</span></div>'
+          + (s.name ? '<div class="rec-name">' + escapeHtml(s.name) + '</div>' : '')
+          + '</div>'
+          + '<div class="row-actions"><button class="mini-btn danger" data-sact="del">削除</button></div></li>';
+      }
+      const r = e.r;
+      const dirCls = r.direction === 'in' ? 'in' : 'out';
+      const dirTxt = r.direction === 'in' ? '入庫' : '出庫';
+      return '<li class="rec-item' + (r.voided ? ' voided' : '') + '" data-rid="' + r.id + '">'
+        + '<div class="rec-main">'
+        + '<div class="rec-time">' + fmtDateTime(r.timestamp)
+        + (r.voided ? '<span class="void-badge">取消</span>' : '')
+        + (r.editedAt ? '<span class="edited-badge">編集済</span>' : '') + '</div>'
+        + '<div class="rec-body"><span class="rec-dir ' + dirCls + '">' + dirTxt + '</span>'
+        + '<span class="rec-code">' + escapeHtml(r.itemCodeSnap) + (r.isManual ? ' ✎' : '') + '</span>'
+        + '<span class="rec-qty">' + r.qty + '</span></div>'
+        + (r.itemNameSnap ? '<div class="rec-name">' + escapeHtml(r.itemNameSnap) + ' / ' + escapeHtml(r.categoryNameSnap || '未分類') + '</div>' : '')
+        + '</div>'
+        + '<div class="row-actions">'
+        + (r.voided ? '' : '<button class="mini-btn" data-act="edit">編集</button>'
+          + '<button class="mini-btn" data-act="void">取消</button>')
+        + '<button class="mini-btn danger" data-act="delete">削除</button>'
+        + '</div></li>';
+    }).join('');
+  }
+
+  // 履歴の行タップで詳細を表示
+  function detailRow(label, value, mono) {
+    return '<div class="detail-row"><span class="d-label">' + escapeHtml(label) + '</span>'
+      + '<span class="d-value' + (mono ? ' mono' : '') + '">' + value + '</span></div>';
+  }
+  function showRecordDetail(r) {
+    const dirTxt = r.direction === 'in' ? '入庫' : '出庫';
+    let status = r.voided ? '取消済み' : '有効';
+    if (r.editedAt) status += '（編集済み）';
+    const html = '<div class="detail-list">'
+      + detailRow('日時', escapeHtml(fmtDateTime(r.timestamp)), true)
+      + detailRow('区分', dirTxt)
+      + detailRow('品番', escapeHtml(r.itemCodeSnap) + (r.isManual ? '（手入力）' : ''), true)
+      + detailRow('品名', escapeHtml(r.itemNameSnap || '（なし）'))
+      + detailRow('種類', escapeHtml(r.categoryNameSnap || '未分類'))
+      + detailRow('数量', String(r.qty), true)
+      + detailRow('状態', escapeHtml(status))
+      + '</div>';
+    showModal('記録の詳細', html, [okBtn()]);
+  }
+  function showStocktakeDetail(s) {
+    const html = '<div class="detail-list">'
+      + detailRow('日時', escapeHtml(fmtDateTime(s.ts)), true)
+      + detailRow('区分', '棚卸し')
+      + detailRow('品番', escapeHtml(s.code), true)
+      + detailRow('品名', escapeHtml(s.name || '（なし）'))
+      + detailRow('在庫数', String(s.qty), true)
+      + '</div>';
+    showModal('棚卸しの詳細', html, [okBtn()]);
+  }
+
+  function renderSummary() {
+    $('#sub-group').hidden = summarySub !== 'group';
+    $('#sub-period').hidden = summarySub !== 'period';
+    $$('.sub-toggle .btn').forEach(b => b.classList.toggle('active', b.dataset.sub === summarySub));
+    if (summarySub === 'group') renderGroup();
+  }
+
+  function renderGroup() {
+    const groups = computeGroupBalance();
+    // 棚卸しだけで入出庫がまだ無い品番も一覧に含める
+    state.stocktakes.forEach(s => {
+      const it = state.items.find(x => normalizeCode(x.code) === normalizeCode(s.code));
+      const cid = it ? (it.categoryId || '__none') : '__none';
+      const cname = it ? catName(it.categoryId) : '未分類';
+      groups[cid] = groups[cid] || { name: cname, items: {} };
+      if (!groups[cid].items[s.code]) groups[cid].items[s.code] = { name: s.name || (it ? it.name : ''), in: 0, out: 0 };
+    });
+    const ids = Object.keys(groups);
+    const box = $('#group-body');
+    if (ids.length === 0) { box.innerHTML = '<div class="empty">記録がありません</div>'; return; }
+    let html = '';
+    ids.sort((a, b) => groups[a].name.localeCompare(groups[b].name, 'ja'));
+    ids.forEach(cid => {
+      html += '<div class="group-cat"><h3>' + escapeHtml(groups[cid].name) + '</h3>';
+      const codes = Object.keys(groups[cid].items).sort();
+      codes.forEach(code => {
+        const g = groups[cid].items[code];
+        const diff = g.in - g.out;
+        const stock = currentStock(code);
+        const cls = stock == null ? '' : (stock >= 0 ? 'bal-pos' : 'bal-neg');
+        const stockDisp = stock == null ? '—' : stock;
+        html += '<div class="group-row"><span class="g-code">' + escapeHtml(code)
+          + (g.name ? ' <span class="muted">' + escapeHtml(g.name) + '</span>' : '')
+          + ' <span class="muted">差引' + (diff >= 0 ? '+' : '') + diff + '</span></span>'
+          + '<span class="g-bal ' + cls + '">在庫 ' + stockDisp + '</span></div>';
+      });
+      html += '</div>';
+    });
+    box.innerHTML = html;
+  }
+
+  function renderPeriod() {
+    const from = $('#per-from').value, to = $('#per-to').value;
+    const map = computePeriod(from, to);
+    const codes = Object.keys(map).sort();
+    const box = $('#period-body');
+    if (codes.length === 0) { box.innerHTML = '<div class="empty">対象期間に記録がありません</div>'; return; }
+    let rows = codes.map(code => {
+      const m = map[code]; const bal = m.in - m.out;
+      return '<tr><td class="code-col">' + escapeHtml(code) + '</td><td>' + m.in + '</td><td>' + m.out
+        + '</td><td class="' + (bal >= 0 ? 'bal-pos' : 'bal-neg') + '">' + (bal >= 0 ? '+' : '') + bal + '</td></tr>';
+    }).join('');
+    box.innerHTML = '<div class="table-wrap"><table class="summary"><thead><tr>'
+      + '<th class="code-col">品番</th><th>入庫計</th><th>出庫計</th><th>差引</th></tr></thead><tbody>'
+      + rows
+      + '</tbody></table></div>';
+  }
+
+  function renderMaster() {
+    // カテゴリ一覧
+    const cl = $('#cat-list');
+    cl.innerHTML = state.categories.length === 0 ? '<div class="muted">種類は未登録です（任意）</div>'
+      : state.categories.slice().sort((a, b) => a.order - b.order).map(c =>
+        '<li class="rec-item" data-cid="' + c.id + '"><div class="rec-main"><span class="rec-code">'
+        + escapeHtml(c.name) + '</span></div><div class="row-actions">'
+        + '<button class="mini-btn danger" data-cact="delcat">削除</button></div></li>').join('');
+    // 種類select
+    const sel = $('#item-cat');
+    sel.innerHTML = '<option value="">未分類</option>' + state.categories.slice().sort((a, b) => a.order - b.order)
+      .map(c => '<option value="' + c.id + '">' + escapeHtml(c.name) + '</option>').join('');
+    // 品番一覧
+    const il = $('#item-list');
+    il.innerHTML = state.items.length === 0 ? '<div class="empty">品番が未登録です</div>'
+      : state.items.slice().sort((a, b) => a.order - b.order).map(it =>
+        '<li class="rec-item" data-iid="' + it.id + '"><div class="rec-main">'
+        + '<span class="rec-code">' + escapeHtml(it.code) + '</span>'
+        + '<div class="rec-name">' + escapeHtml(it.name || '') + ' / ' + escapeHtml(catName(it.categoryId)) + '</div></div>'
+        + '<div class="row-actions"><button class="mini-btn" data-iact="edit">編集</button>'
+        + '<button class="mini-btn danger" data-iact="del">削除</button></div></li>').join('');
+  }
+
+  function renderData() {
+    const count = state.records.length;
+    const live = liveRecords().length;
+    let size = 0;
+    try { Object.values(K).forEach(k => { const v = localStorage.getItem(k); if (v) size += v.length; }); } catch (e) {}
+    $('#storage-info').innerHTML = '記録 ' + count + '件（有効 ' + live + '件） / 品番 ' + state.items.length + '件 / 概算サイズ '
+      + Math.ceil(size / 1024) + ' KB' + (storageOK ? '' : '<br><strong style="color:var(--out)">⚠ 保存が無効です</strong>');
+    $('#last-backup').textContent = state.meta.lastBackupAt
+      ? '最終バックアップ: ' + fmtDateTime(state.meta.lastBackupAt) : '※まだバックアップしていません';
+  }
+
+  /* ===== G. ENTRY FLOW ===== */
+  function setDigit(n) {
+    if (!draft.item) { flashError(); return; }
+    if (n === 'clear') { draft.qty = '0'; }
+    else if (n === 'back') { draft.qty = draft.qty.length > 1 ? draft.qty.slice(0, -1) : '0'; }
+    else {
+      if (draft.qty === '0') draft.qty = n;
+      else if (draft.qty.length < 7) draft.qty += n;
+    }
+    renderEntryDisplay();
+  }
+  function flashError() {
+    [$('#entry-qty'), $('#entry-mini-qty')].forEach(el => {
+      if (!el) return;
+      el.classList.add('error');
+      setTimeout(() => el.classList.remove('error'), 350);
+    });
+  }
+  function commit() {
+    if (!draft.item) { $('#entry-expr').textContent = '⚠ 品番を選択してください'; flashError(); return; }
+    if (!draft.dir) { $('#entry-expr').textContent = '⚠ 入庫か出庫を選んでください'; flashError(); return; }
+    const qty = parseInt(draft.qty, 10);
+    if (!qty || qty <= 0) { flashError(); return; }
+    const snap = draft.item.isManual
+      ? makeSnapshot(null, draft.item.code)
+      : makeSnapshot(draft.item.itemId);
+    if (!snap) { toast('品番が見つかりません'); return; }
+    addRecord(snap, draft.dir, qty);
+    toast('記録しました：' + (draft.dir === 'in' ? '入庫' : '出庫') + ' ' + snap.code + ' ' + qty);
+    // 確定後：数量だけクリア・品番と方向は保持
+    draft.qty = '0';
+    renderEntry();
+  }
+  function selectManual() {
+    showModal('リスト外品番の手入力',
+      '<div class="field"><label>品番</label><input type="text" id="m-code" placeholder="例: Z-999"></div>'
+      + '<div id="m-similar"></div>',
+      [cancelBtn(), {
+        label: '使う', cls: 'btn-op', onClick: () => {
+          const code = ($('#m-code').value || '').trim();
+          if (!code) { toast('品番を入力してください'); return false; }
+          draft.item = { itemId: null, code, name: '', isManual: true };
+          renderEntry();
+        }
+      }]);
+    setTimeout(() => {
+      const inp = $('#m-code'); if (!inp) return;
+      inp.focus();
+      inp.addEventListener('input', () => {
+        const sim = findSimilar(inp.value);
+        $('#m-similar').innerHTML = sim.length
+          ? '<div class="similar-warn">もしかして: ' + sim.map(s => escapeHtml(s.code)).join(' / ') + ' ？</div>' : '';
+      });
+    }, 50);
+  }
+
+  /* ===== H. IO ===== */
+  function exportJSON() {
+    state.meta.lastBackupAt = Date.now(); saveMeta();
+    const payload = { schemaVersion: SCHEMA, exportedAt: new Date().toISOString(), data: {
+      categories: state.categories, items: state.items, records: state.records, voidlog: state.voidlog, stocktakes: state.stocktakes, meta: state.meta
+    } };
+    download('inventory_backup_' + fmtDate(Date.now()).replace(/\//g, '-') + '.json',
+      new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+    renderData();
+    toast('JSONを書き出しました');
+  }
+  function exportCSV() {
+    const head = ['日時', '方向', '品番', '品名', '種類', '数量', '手入力', '状態'];
+    const rows = sortRecords(state.records.slice()).map(r => [
+      fmtDateTime(r.timestamp), r.direction === 'in' ? '入庫' : '出庫',
+      r.itemCodeSnap, r.itemNameSnap || '', r.categoryNameSnap || '未分類',
+      r.qty, r.isManual ? '手入力' : '', r.voided ? '取消' : '有効'
+    ]);
+    const csv = [head].concat(rows).map(row =>
+      row.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\r\n');
+    download('inventory_' + fmtDate(Date.now()).replace(/\//g, '-') + '.csv',
+      new Blob(['﻿' + csv], { type: 'text/csv' }));
+    toast('CSVを書き出しました');
+  }
+  function importJSON(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let parsed;
+      try { parsed = JSON.parse(reader.result); } catch (e) { toast('読み込めませんでした（JSON不正）'); return; }
+      const d = parsed && parsed.data;
+      if (!d || !Array.isArray(d.records) || !Array.isArray(d.items)) { toast('形式が違います'); return; }
+      // 数量が数値でない記録があれば取り込みを中止（NaN伝播で集計が壊れるのを防ぐ）
+      const badQty = d.records.some(r => !Number.isFinite(Number(r && r.qty)));
+      if (badQty) { toast('数量が不正なデータが含まれています。読み込みを中止しました'); return; }
+      const badStock = Array.isArray(d.stocktakes) && d.stocktakes.some(s => !Number.isFinite(Number(s && s.qty)));
+      if (badStock) { toast('棚卸しの数値が不正です。読み込みを中止しました'); return; }
+      showModal('データを復元しますか？',
+        '<p>現在のデータ（記録 ' + state.records.length + '件）を、読み込んだデータ（記録 '
+        + d.records.length + '件）で<strong>すべて置き換え</strong>ます。<br><br>'
+        + '念のため、置き換える前に現在のデータを自動でバックアップ書き出しします。</p>',
+        [cancelBtn(), {
+          label: '置き換える', cls: 'btn-op', onClick: () => {
+            closeModal(); // 確認モーダルを先に閉じる（失敗時のエラーモーダルを隠さないため）
+            exportJSON(); // 取り込み前の自動退避
+            state.categories = d.categories || [];
+            state.items = d.items || [];
+            state.records = (d.records || []).map(r => Object.assign({}, r, { qty: Number(r.qty) }));
+            state.voidlog = d.voidlog || [];
+            state.stocktakes = (d.stocktakes || []).map(s => Object.assign({}, s, { qty: Number(s.qty) }));
+            state.meta = Object.assign(state.meta, d.meta || {});
+            if (saveAll()) { showView('history'); toast('復元しました'); }
+            else { loadAll(); showView('history'); } // エラー表示は saveAll 内モーダルに委ねる
+            return false; // 自動closeで saveAll のエラーモーダルを消さない
+          }
+        }]);
+    };
+    reader.readAsText(file);
+  }
+  function download(filename, blob) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function printReport(scope) {
+    const area = $('#print-area');
+    const now = fmtDateTime(Date.now());
+    if (scope === 'history') {
+      const list = filterRecords(histFilter);
+      const period = (histFilter.from || histFilter.to)
+        ? (histFilter.from || '〜') + ' 〜 ' + (histFilter.to || '〜') : '全期間';
+      area.innerHTML = '<h1>入出庫 記録一覧</h1>'
+        + '<div class="print-meta">対象期間: ' + escapeHtml(period)
+        + (histFilter.q ? ' / 品番: ' + escapeHtml(histFilter.q) : '')
+        + ' ／ 作成: ' + now + ' ／ 件数: ' + list.length + '件</div>'
+        + '<table><thead><tr><th class="l">日時</th><th class="l">方向</th><th class="l">品番</th>'
+        + '<th class="l">品名</th><th class="l">種類</th><th>数量</th><th class="l">状態</th></tr></thead><tbody>'
+        + list.map(r => '<tr><td class="l">' + fmtDateTime(r.timestamp) + '</td><td class="l">'
+          + (r.direction === 'in' ? '入庫' : '出庫') + '</td><td class="l">' + escapeHtml(r.itemCodeSnap)
+          + '</td><td class="l">' + escapeHtml(r.itemNameSnap || '') + '</td><td class="l">'
+          + escapeHtml(r.categoryNameSnap || '未分類') + '</td><td>' + r.qty + '</td><td class="l">'
+          + (r.voided ? '取消' : '有効') + '</td></tr>').join('')
+        + '</tbody></table>';
+    } else {
+      const from = $('#per-from').value, to = $('#per-to').value;
+      const map = computePeriod(from, to);
+      const codes = Object.keys(map).sort();
+      const rows = codes.map(code => {
+        const m = map[code]; const bal = m.in - m.out;
+        return '<tr><td class="l">' + escapeHtml(code) + '</td><td class="l">' + escapeHtml(m.name || '')
+          + '</td><td>' + m.in + '</td><td>' + m.out + '</td><td>' + (bal >= 0 ? '+' : '') + bal + '</td></tr>';
+      }).join('');
+      area.innerHTML = '<h1>期間集計</h1>'
+        + '<div class="print-meta">対象期間: ' + escapeHtml((from || '〜') + ' 〜 ' + (to || '〜'))
+        + ' ／ 作成: ' + now + ' ／ 品番数: ' + codes.length + '件</div>'
+        + '<table><thead><tr><th class="l">品番</th><th class="l">品名</th><th>入庫計</th><th>出庫計</th><th>差引</th></tr></thead><tbody>'
+        + rows + '</tbody></table>';
+    }
+    window.print();
+  }
+
+  /* ===== モーダル・トースト ===== */
+  let toastTimer = null;
+  function toast(msg) {
+    const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+  function showModal(title, contentHtml, buttons) {
+    $('#modal-title').textContent = title;
+    $('#modal-content').innerHTML = contentHtml;
+    const actions = $('#modal-actions');
+    actions.innerHTML = '';
+    (buttons || [okBtn()]).forEach(b => {
+      const el = document.createElement('button');
+      el.className = 'btn ' + (b.cls || 'btn-fn');
+      el.textContent = b.label;
+      // onClick が false を返したら開いたまま、それ以外は自動で閉じる（文字列マッチに依存しない）
+      el.addEventListener('click', () => {
+        const keepOpen = b.onClick ? (b.onClick() === false) : false;
+        if (!keepOpen) closeModal();
+      });
+      actions.appendChild(el);
+    });
+    $('#modal').hidden = false;
+  }
+  function closeModal() { $('#modal').hidden = true; }
+  // onClick を持たないボタンは showModal が自動で閉じる（二重closeを避けるため自前closeは付けない）
+  function okBtn() { return { label: '閉じる', cls: 'btn-fn' }; }
+  function cancelBtn() { return { label: 'キャンセル', cls: 'btn-fn' }; }
+
+  // closeModal は showModal が自動実行する。cb は「理由文字列」を受け取り、保存・表示更新だけ行えばよい
+  function confirmReason(title, msg, actionLabel, actionCls, cb) {
+    showModal(title,
+      '<p>' + msg + '</p><div class="field"><label>理由（任意・記録に残ります）</label><input type="text" id="reason-input" placeholder="例: 数量打ち間違い"></div>',
+      [cancelBtn(), { label: actionLabel, cls: actionCls, onClick: () => { cb(($('#reason-input').value || '').trim()); } }]);
+  }
+
+  // 棚卸し：実際に数えた在庫数に合わせ直す
+  function openStocktake() {
+    if (!draft.item) { toast('先に品番を選んでください'); return; }
+    const now = currentStock(draft.item.code);
+    const nowNum = now == null ? 0 : now;
+    showModal('在庫を合わせる（棚卸し）',
+      '<p>「' + escapeHtml(draft.item.code) + '」の実際の在庫数を入力してください。<br>'
+      + 'いまの計算上の在庫は <strong>' + nowNum + '</strong> です。</p>'
+      + '<div class="field"><label>実際の在庫数</label><input type="number" id="st-qty" inputmode="numeric" value="' + nowNum + '"></div>'
+      + '<p class="muted">※この時点の在庫として確定します。以降の入庫・出庫で自動的に増減します。</p>',
+      [cancelBtn(), {
+        label: '確定', cls: 'btn-op', onClick: () => {
+          const q = parseInt($('#st-qty').value, 10);
+          if (isNaN(q) || q < 0) { toast('0以上の数で入力してください'); return false; }
+          addStocktake(draft.item, q);
+          renderEntry(); toast('在庫を ' + q + ' に合わせました');
+        }
+      }]);
+  }
+
+  function openEditRecord(r) {
+    showModal('記録の編集',
+      '<div class="field"><label>品番</label><input type="text" id="e-code" value="' + escapeHtml(r.itemCodeSnap) + '"></div>'
+      + '<div class="field"><label>品名</label><input type="text" id="e-name" value="' + escapeHtml(r.itemNameSnap || '') + '"></div>'
+      + '<div class="field"><label>方向</label><select id="e-dir"><option value="in"' + (r.direction === 'in' ? ' selected' : '')
+      + '>入庫</option><option value="out"' + (r.direction === 'out' ? ' selected' : '') + '>出庫</option></select></div>'
+      + '<div class="field"><label>数量</label><input type="number" id="e-qty" inputmode="numeric" value="' + r.qty + '"></div>'
+      + '<div class="field"><label>理由（任意）</label><input type="text" id="e-reason" placeholder="例: 品番打ち間違い"></div>'
+      + '<p class="muted">※この記録だけを直します。品番マスタや他の記録には影響しません。</p>',
+      [cancelBtn(), {
+        label: '保存', cls: 'btn-op', onClick: () => {
+          const code = ($('#e-code').value || '').trim();
+          if (!code) { toast('品番を入力してください'); return false; }
+          const q = parseInt($('#e-qty').value, 10);
+          if (!q || q <= 0) { toast('数量は正の数で入力してください'); return false; }
+          editRecord(r.id, { code: code, name: ($('#e-name').value || '').trim(), direction: $('#e-dir').value, qty: q }, ($('#e-reason').value || '').trim());
+          renderHistory(); toast('編集しました');
+        }
+      }]);
+  }
+  function openEditItem(it) {
+    showModal('品番の編集',
+      '<div class="field"><label>品番</label><input type="text" id="ei-code" value="' + escapeHtml(it.code) + '"></div>'
+      + '<div class="field"><label>品名</label><input type="text" id="ei-name" value="' + escapeHtml(it.name || '') + '"></div>'
+      + '<div class="field"><label>種類</label><select id="ei-cat"><option value="">未分類</option>'
+      + state.categories.map(c => '<option value="' + c.id + '"' + (it.categoryId === c.id ? ' selected' : '') + '>' + escapeHtml(c.name) + '</option>').join('')
+      + '</select></div><p class="muted">※過去の記録は当時の品番で残ります。品番を変えると、その記録は新しい品番の在庫に合算されません。</p>',
+      [cancelBtn(), {
+        label: '保存', cls: 'btn-op', onClick: () => {
+          const code = ($('#ei-code').value || '').trim();
+          if (!code) { toast('品番を入力してください'); return false; }
+          const nc = normalizeCode(code);
+          if (state.items.some(x => x.id !== it.id && normalizeCode(x.code) === nc)) { toast('同じ品番が既にあります'); return false; }
+          const name = ($('#ei-name').value || '').trim();
+          const cat = $('#ei-cat').value || null;
+          const doSave = () => { it.code = code; it.name = name; it.categoryId = cat; saveItems(); renderMaster(); toast('保存しました'); };
+          // 品番コードを変える場合は、過去記録が旧品番に残る旨を確認モーダルで警告
+          const codeChanged = normalizeCode(it.code) !== nc && state.records.some(r => normalizeCode(r.itemCodeSnap) === normalizeCode(it.code));
+          if (codeChanged) {
+            const oldCode = it.code;
+            closeModal();
+            showModal('品番変更の確認',
+              '<p>品番を「' + escapeHtml(oldCode) + '」→「' + escapeHtml(code) + '」に変更します。<br>'
+              + '過去の記録は旧品番「' + escapeHtml(oldCode) + '」のまま残り、新品番の在庫には合算されません。</p>',
+              [cancelBtn(), { label: '変更する', cls: 'btn-op', onClick: () => { doSave(); } }]);
+            return false; // 編集モーダルは閉じ済み・確認モーダルを残す
+          }
+          doSave();
+        }
+      }]);
+  }
+
+  /* ===== I. EVENTS ===== */
+  function bindEvents() {
+    // タブ
+    $$('.tab').forEach(t => t.addEventListener('click', () => showView(t.dataset.go)));
+
+    // 記録：方向
+    $$('.dir-btn').forEach(b => b.addEventListener('click', () => {
+      draft.dir = b.dataset.dir; renderEntry();
+    }));
+    // 記録：種類タブ・品番・手入力（委譲）
+    $('#entry-cat-tabs').addEventListener('click', e => {
+      const t = e.target.closest('.cat-tab'); if (!t) return;
+      draft.catFilter = t.dataset.cat || null; renderEntry();
+    });
+    $('#entry-items').addEventListener('click', e => {
+      const m = e.target.closest('[data-manual]');
+      if (m) { selectManual(); return; }
+      const tile = e.target.closest('.item-tile'); if (!tile) return;
+      const it = state.items.find(x => x.id === tile.dataset.item);
+      if (it) { draft.item = { itemId: it.id, code: it.code, name: it.name, isManual: false }; renderEntry(); }
+    });
+    // テンキー
+    $('.numpad').addEventListener('click', e => {
+      const b = e.target.closest('[data-num]'); if (!b) return;
+      setDigit(b.dataset.num);
+      b.classList.add('pressed'); setTimeout(() => b.classList.remove('pressed'), 120);
+    });
+    $('#commit-btn').addEventListener('click', commit);
+    $('#stocktake-btn').addEventListener('click', openStocktake);
+
+    // 履歴
+    $('#hist-apply').addEventListener('click', () => {
+      histFilter = { q: $('#hist-q').value.trim(), from: $('#hist-from').value, to: $('#hist-to').value };
+      renderHistory();
+    });
+    $('#hist-clear').addEventListener('click', () => {
+      histFilter = { q: '', from: '', to: '' };
+      $('#hist-q').value = ''; $('#hist-from').value = ''; $('#hist-to').value = '';
+      renderHistory();
+    });
+    $('#hist-print').addEventListener('click', () => printReport('history'));
+    $('#hist-list').addEventListener('click', e => {
+      // 棚卸し行の削除
+      const sBtn = e.target.closest('[data-sact]');
+      if (sBtn) {
+        const sli = e.target.closest('[data-sid]'); const id = sli.dataset.sid;
+        showModal('棚卸しを削除しますか？',
+          '<p>この棚卸し記録を削除します。削除すると、この棚卸しを基準にした在庫の計算が変わります。</p>',
+          [cancelBtn(), { label: '削除', cls: 'btn-danger', onClick: () => { deleteStocktake(id); renderHistory(); toast('棚卸しを削除しました'); } }]);
+        return;
+      }
+      const btn = e.target.closest('[data-act]');
+      if (!btn) {
+        // ボタン以外（行本体）のタップ → 詳細を表示
+        const sli = e.target.closest('[data-sid]');
+        if (sli) { const s = state.stocktakes.find(x => x.id === sli.dataset.sid); if (s) showStocktakeDetail(s); return; }
+        const rli = e.target.closest('[data-rid]');
+        if (rli) { const rr = state.records.find(x => x.id === rli.dataset.rid); if (rr) showRecordDetail(rr); }
+        return;
+      }
+      const li = e.target.closest('[data-rid]'); const r = state.records.find(x => x.id === li.dataset.rid);
+      if (!r) return;
+      const act = btn.dataset.act;
+      if (act === 'edit') openEditRecord(r);
+      if (act === 'void') confirmReason('記録を取り消しますか？', 'この記録を無効にします。記録自体は証跡として残ります。', '取り消す', 'btn-danger', reason => { voidRecord(r.id, reason); renderHistory(); toast('取り消しました'); });
+      if (act === 'delete') confirmReason('完全に削除しますか？', '⚠ 記録を完全に消去します。元に戻せません（削除した事実はログに残ります）。', '削除する', 'btn-danger', reason => { deleteRecord(r.id, reason); renderHistory(); toast('削除しました'); });
+    });
+
+    // 集計
+    $$('.sub-toggle .btn').forEach(b => b.addEventListener('click', () => { summarySub = b.dataset.sub; renderSummary(); }));
+    $('#per-apply').addEventListener('click', renderPeriod);
+    $('#per-print').addEventListener('click', () => printReport('period'));
+
+    // マスタ：カテゴリ
+    $('#cat-add').addEventListener('click', () => {
+      if (addCategory($('#cat-name').value)) { $('#cat-name').value = ''; renderMaster(); toast('種類を追加しました'); }
+    });
+    $('#cat-list').addEventListener('click', e => {
+      const b = e.target.closest('[data-cact]'); if (!b) return;
+      const li = e.target.closest('[data-cid]'); const id = li.dataset.cid;
+      showModal('種類を削除しますか？', '<p>この種類を削除します。所属する品番は「未分類」になります。過去記録には影響しません。</p>',
+        [cancelBtn(), { label: '削除', cls: 'btn-danger', onClick: () => { deleteCategory(id); renderMaster(); } }]);
+    });
+    // マスタ：品番
+    $('#item-add').addEventListener('click', () => {
+      if (addItem($('#item-code').value, $('#item-name').value, $('#item-cat').value || null)) {
+        $('#item-code').value = ''; $('#item-name').value = ''; renderMaster(); toast('品番を追加しました');
+      }
+    });
+    $('#item-list').addEventListener('click', e => {
+      const b = e.target.closest('[data-iact]'); if (!b) return;
+      const li = e.target.closest('[data-iid]'); const it = state.items.find(x => x.id === li.dataset.iid);
+      if (!it) return;
+      if (b.dataset.iact === 'edit') openEditItem(it);
+      if (b.dataset.iact === 'del') showModal('品番を削除しますか？',
+        '<p>マスタから「' + escapeHtml(it.code) + '」を削除します。<br>過去の記録は当時の値で残ります。</p>',
+        [cancelBtn(), { label: '削除', cls: 'btn-danger', onClick: () => { deleteItem(it.id); renderMaster(); } }]);
+    });
+
+    // データ
+    $('#export-json').addEventListener('click', exportJSON);
+    $('#export-csv').addEventListener('click', exportCSV);
+    $('#import-json').addEventListener('click', () => $('#import-file').click());
+    $('#import-file').addEventListener('change', e => {
+      const f = e.target.files[0]; if (f) importJSON(f); e.target.value = '';
+    });
+
+    // モーダル背景クリックで閉じる
+    $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+
+    // 日付欄：タップでカレンダーを開く（対応ブラウザのみ）
+    $$('input[type="date"]').forEach(inp => {
+      inp.addEventListener('click', () => { try { inp.showPicker(); } catch (e) {} });
+    });
+  }
+
+  /* ===== J. INIT ===== */
+  function init() {
+    checkStorage();
+    loadAll();
+    bindEvents();
+    if (!storageOK) {
+      showModal('データを保存できません',
+        '<p>このブラウザでは保存領域が使えません（プライベートモードの可能性）。'
+        + '記録は残りませんのでご注意ください。</p>', [okBtn()]);
+    }
+    showView('entry');
+  }
+  document.addEventListener('DOMContentLoaded', init);
+})();
+</script>
+</body>
+</html>
