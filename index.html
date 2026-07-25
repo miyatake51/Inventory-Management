@@ -273,6 +273,38 @@ body::before {
 .item-tile.manual { background: #20283f; }
 .item-tile.manual .code { color: var(--text-fn); }
 
+/* テンキー直上の数量サブ表示（スクロールせずに入力中の数字を確認できるようにする） */
+.entry-mini {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--display-bg); border-radius: 4px;
+  padding: 7px 14px; margin-bottom: 10px;
+  position: relative; overflow: hidden;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.04), 0 1px 0 rgba(255,255,255,0.06);
+}
+.entry-mini::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px);
+}
+.mini-dir {
+  font-family: 'Zen Maru Gothic', sans-serif; font-size: 0.82rem; letter-spacing: 0.08em;
+  padding: 2px 9px; border-radius: 3px; position: relative; z-index: 1; white-space: nowrap;
+}
+.mini-dir.is-in { color: var(--in); background: var(--in-dim); }
+.mini-dir.is-out { color: var(--out); background: var(--out-dim); }
+.mini-dir.is-none { color: rgba(150,160,190,0.4); }
+.mini-code {
+  font-family: 'DM Mono', monospace; font-size: 0.78rem; color: rgba(200,168,75,0.55);
+  position: relative; z-index: 1; flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mini-qty {
+  font-family: 'DM Mono', monospace; font-weight: 400; font-size: 1.9rem;
+  color: var(--gold-light); line-height: 1.15; text-shadow: 0 0 16px rgba(200,168,75,0.3);
+  position: relative; z-index: 1; transition: transform 0.06s ease;
+}
+.mini-qty.pulse { transform: scale(0.96); }
+.mini-qty.error { color: var(--danger); animation: shake .3s; }
+
 /* テンキー */
 .numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
 .numpad .btn { height: 56px; font-size: 1.3rem; }
@@ -450,6 +482,12 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
       <div class="cat-tabs" id="entry-cat-tabs"></div>
       <div class="item-grid" id="entry-items"></div>
       <div id="similar-warn-box"></div>
+
+      <div class="entry-mini">
+        <span class="mini-dir is-none" id="entry-mini-dir">— —</span>
+        <span class="mini-code" id="entry-mini-code"></span>
+        <span class="mini-qty" id="entry-mini-qty">0</span>
+      </div>
 
       <div class="numpad">
         <button class="btn btn-num" data-num="7">7</button>
@@ -911,6 +949,7 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
 
   function renderEntryDisplay() {
     const expr = $('#entry-expr'), dirEl = $('#entry-dir'), qtyEl = $('#entry-qty');
+    const miniDir = $('#entry-mini-dir'), miniQty = $('#entry-mini-qty'), miniCode = $('#entry-mini-code');
     if (draft.item) {
       expr.textContent = draft.item.code + (draft.item.name ? '  ' + draft.item.name : '') + (draft.item.isManual ? '  (手入力)' : '');
     } else {
@@ -921,6 +960,12 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     qtyEl.textContent = draft.qty;
     qtyEl.classList.remove('pulse'); void qtyEl.offsetWidth; qtyEl.classList.add('pulse');
     setTimeout(() => qtyEl.classList.remove('pulse'), 80);
+    miniDir.className = 'mini-dir ' + (draft.dir === 'in' ? 'is-in' : draft.dir === 'out' ? 'is-out' : 'is-none');
+    miniDir.textContent = draft.dir === 'in' ? '⬇ 入庫' : draft.dir === 'out' ? '⬆ 出庫' : '— —';
+    miniCode.textContent = draft.item ? draft.item.code : '';
+    miniQty.textContent = draft.qty;
+    miniQty.classList.remove('pulse'); void miniQty.offsetWidth; miniQty.classList.add('pulse');
+    setTimeout(() => miniQty.classList.remove('pulse'), 80);
     renderStockBar();
   }
 
@@ -1158,9 +1203,11 @@ table.summary tr.total-row td { border-top: 2px solid var(--gold-dim); color: va
     renderEntryDisplay();
   }
   function flashError() {
-    const el = $('#entry-qty');
-    el.classList.add('error');
-    setTimeout(() => el.classList.remove('error'), 350);
+    [$('#entry-qty'), $('#entry-mini-qty')].forEach(el => {
+      if (!el) return;
+      el.classList.add('error');
+      setTimeout(() => el.classList.remove('error'), 350);
+    });
   }
   function commit() {
     if (!draft.item) { $('#entry-expr').textContent = '⚠ 品番を選択してください'; flashError(); return; }
